@@ -45,7 +45,7 @@ services:
   env: docker
   envVars:
   - key: VITE_API_URL
-    value: https://ai-grid-backend.onrender.com
+    value: https://ai-grid-backend-jvru.onrender.com
   - key: DOCKER_BUILDKIT
     value: '1'
   healthCheckPath: /

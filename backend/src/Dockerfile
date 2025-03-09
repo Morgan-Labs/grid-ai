@@ -7,17 +7,13 @@ FROM python:3.12.1-slim-bookworm AS builder
 # Set working directory
 WORKDIR /usr/src/app
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
 # Install system dependencies - only what's needed for building wheels
 RUN --mount=type=cache,target=/var/cache/apt \
-    apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+    apt-get update
+
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get install -y --no-install-recommends build-essential && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install python dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -62,8 +58,8 @@ COPY --from=builder /usr/src/app/src ./src
 COPY pyproject.toml ./
 
 # Install dependencies with conflict resolution
-RUN pip install --no-cache-dir --no-deps /wheels/* && \
-    pip install --no-cache-dir pydantic==2.10.6 pydantic-core==2.27.2
+RUN pip install --no-cache-dir --no-index --no-deps /wheels/* && \
+    pip install --no-cache-dir --no-index pydantic==2.10.6 pydantic-core==2.27.2
 
 # Install system dependencies for PDF processing - only what's actually needed
 # poppler-utils: For PDF processing
@@ -73,18 +69,21 @@ RUN pip install --no-cache-dir --no-deps /wheels/* && \
 # tesseract-ocr: For OCR (only if needed)
 # tesseract-ocr-eng: English language for OCR
 RUN --mount=type=cache,target=/var/cache/apt \
-    apt-get update && apt-get install -y --no-install-recommends \
+    apt-get update
+
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get install -y --no-install-recommends \
     poppler-utils \
     libmagic1 \
     libgl1 \
     libglib2.0-0 \
     tesseract-ocr \
-    tesseract-ocr-eng \
-    && rm -rf /var/lib/apt/lists/*
+    tesseract-ocr-eng && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install the project with all PDF processing dependencies including Textract and GPT-4o
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e ".[pdf-all]" && \
+    pip install --no-index -e ".[pdf-all]" && \
     # Only install spaCy model if absolutely needed by unstructured
     if pip show unstructured | grep -q "spacy"; then \
         python -m spacy download en_core_web_sm --no-deps; \
