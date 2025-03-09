@@ -31,8 +31,6 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://ai-grid.onrender.com",
-        "https://ai-grid-backend.onrender.com",
         "https://ai-grid-ik5o.onrender.com",
         "https://ai-grid-backend-jvru.onrender.com",
         "http://localhost:3000",
@@ -174,23 +172,17 @@ async def startup_event():
         
         # Try to set directory permissions
         try:
-            os.chmod(data_dir, 0o777)
-            logger.info(f"Set permissions on data directory: {data_dir}")
+            # os.chmod(data_dir, 0o777) # Removed permission setting
+            logger.info(f"Ensured data directory exists: {data_dir}")
         except Exception as e:
             logger.warning(f"Could not set permissions on data directory: {e}")
-            
+
         # Create database files if they don't exist
         table_states_db = os.path.join(data_dir, "table_states.db")
         if not os.path.exists(table_states_db):
             open(table_states_db, 'a').close()
             logger.info(f"Created table states database file: {table_states_db}")
-            
-            # Try to set file permissions
-            try:
-                os.chmod(table_states_db, 0o666)
-                logger.info(f"Set permissions on database file: {table_states_db}")
-            except Exception as e:
-                logger.warning(f"Could not set permissions on database file: {e}")
+
     except Exception as e:
         logger.error(f"Error setting up data directory: {e}")
     

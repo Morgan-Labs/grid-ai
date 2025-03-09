@@ -60,8 +60,6 @@ class Settings(BaseSettings):
     project_name: str = "AI Grid API"
     api_v1_str: str = "/api/v1"
     backend_cors_origins: List[str] = [
-        "https://ai-grid.onrender.com",
-        "https://ai-grid-backend.onrender.com",
         "https://ai-grid-ik5o.onrender.com",
         "https://ai-grid-backend-jvru.onrender.com",
         "http://localhost:3000",
