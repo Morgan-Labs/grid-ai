@@ -1,0 +1,36 @@
+services:
+  # Backend API service
+  - type: web
+    name: ai-grid-backend
+    env: docker
+    dockerfilePath: ./backend/src/Dockerfile
+    dockerContext: ./backend
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: VECTOR_DB_PROVIDER
+        value: milvus
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MILVUS_DB_URI
+        value: /data/milvus_db.db
+    healthCheckPath: /ping
+    disk:
+      name: milvus-data
+      mountPath: /data
+      sizeGB: 10
+    includePaths:
+      - 'backend/'
+    
+  # Frontend web service
+  - type: web
+    name: ai-grid
+    env: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    includePaths:
+      - 'frontend/'
+    envVars:
+      - key: VITE_API_URL
+        value: https://ai-grid-backend.onrender.com
+    healthCheckPath: /

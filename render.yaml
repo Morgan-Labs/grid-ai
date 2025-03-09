@@ -1,0 +1,53 @@
+services:
+- buildCommand: DOCKER_BUILDKIT=1 docker build -t ai-grid-backend:latest -f ./backend/src/Dockerfile
+    ./backend
+  buildFilter:
+    ignoredPaths:
+    - backend/tests/**
+    paths:
+    - backend/**
+  disk:
+    mountPath: /data
+    name: milvus-data
+    sizeGB: 10
+  dockerContext: ./backend
+  dockerfilePath: ./backend/src/Dockerfile
+  env: docker
+  envVars:
+  - key: ENVIRONMENT
+    value: production
+  - key: VECTOR_DB_PROVIDER
+    value: milvus
+  - key: OPENAI_API_KEY
+    sync: false
+  - key: MILVUS_DB_URI
+    value: /data/milvus_db.db
+  - key: TABLE_STATES_DB_URI
+    value: /data/table_states.db
+  - key: AUTH_PASSWORD
+    sync: false
+  - key: JWT_SECRET
+    sync: false
+  - key: DOCKER_BUILDKIT
+    value: '1'
+  healthCheckPath: /ping
+  name: ai-grid-backend
+  type: web
+- buildCommand: DOCKER_BUILDKIT=1 docker build -t ai-grid:latest -f ./frontend/Dockerfile
+    ./frontend
+  buildFilter:
+    ignoredPaths:
+    - frontend/tests/**
+    paths:
+    - frontend/**
+  dockerContext: ./frontend
+  dockerfilePath: ./frontend/Dockerfile
+  env: docker
+  envVars:
+  - key: VITE_API_URL
+    value: https://ai-grid-backend.onrender.com
+  - key: DOCKER_BUILDKIT
+    value: '1'
+  healthCheckPath: /
+  name: ai-grid
+  type: web

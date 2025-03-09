@@ -1,0 +1,137 @@
+.react-grid-wrapper {
+  --border-color: light-dark(
+    var(--mantine-color-gray-3),
+    var(--mantine-color-dark-4)
+  );
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+
+  /* Styles for drag and drop */
+  :global {
+    .dragging {
+      opacity: 0.5;
+      cursor: grabbing !important;
+    }
+    
+    .drop-target {
+      position: relative;
+    }
+    
+    .drop-target::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: var(--mantine-color-blue-light);
+      opacity: 0.3;
+      pointer-events: none;
+    }
+    
+    .drop-left::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 4px;
+      height: 100%;
+      background-color: var(--mantine-color-blue-filled);
+      pointer-events: none;
+    }
+    
+    .drop-right::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 4px;
+      height: 100%;
+      background-color: var(--mantine-color-blue-filled);
+      pointer-events: none;
+    }
+  }
+
+  :global {
+    .rg-cell {
+      font-size: var(--mantine-font-size-sm) !important;
+      color: var(--mantine-color-text) !important;
+      border-color: var(--border-color) !important;
+    }
+
+    .rg-header-cell,
+    .rg-kt-column-cell,
+    .rg-kt-row-cell {
+      font-weight: 500;
+      background-color: light-dark(
+        var(--mantine-color-gray-0),
+        var(--mantine-color-dark-6)
+      ) !important;
+    }
+
+    .rg-header-cell {
+      padding: var(--mantine-spacing-xs) !important;
+      font-weight: 500 !important;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+
+    .rg-kt-column-cell,
+    .rg-kt-row-cell {
+      padding: 0 !important;
+    }
+
+    .rg-kt-cell-cell {
+      white-space: normal !important;
+    }
+
+    .rg-cell-focus {
+      border-color: var(--mantine-color-blue-filled) !important;
+    }
+
+    .rg-partial-area-selected-range {
+      background-color: var(--mantine-color-blue-light) !important;
+    }
+
+    .rg-celleditor {
+      padding: 0 !important;
+      font-size: var(--mantine-font-size-sm) !important;
+      background-color: var(--mantine-color-body) !important;
+      height: unset !important;
+      min-height: 49px !important;
+    }
+
+    .rg-context-menu {
+      overflow: hidden;
+      min-width: 80px;
+      border-radius: var(--mantine-radius-default);
+      box-shadow: var(--mantine-shadow-sm);
+      border: 1px solid var(--border-color);
+      background-color: var(--mantine-color-body);
+      color: var(--mantine-color-text);
+
+      .rg-context-menu-option {
+        padding: calc(var(--mantine-spacing-xs) * 0.5) var(--mantine-spacing-sm);
+        font-size: var(--mantine-font-size-sm);
+
+        &:hover {
+          background-color: light-dark(
+            var(--mantine-color-gray-light),
+            var(--mantine-color-dark-light)
+          );
+        }
+      }
+    }
+  }
+}
+
+/* Pagination container styles */
+.paginationContainer {
+  border-top: 1px solid var(--border-color);
+  background-color: light-dark(
+    var(--mantine-color-gray-0),
+    var(--mantine-color-dark-7)
+  );
+}
