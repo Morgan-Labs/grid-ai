@@ -58,8 +58,8 @@ COPY --from=builder /usr/src/app/src ./src
 COPY pyproject.toml ./
 
 # Install dependencies with conflict resolution
-RUN pip install --no-cache-dir --no-index --no-deps /wheels/* && \
-    pip install --no-cache-dir --no-index pydantic==2.10.6 pydantic-core==2.27.2
+RUN pip install --no-cache-dir --no-deps /wheels/* && \
+    pip install --no-cache-dir pydantic==2.10.6 pydantic-core==2.27.2
 
 # Install system dependencies for PDF processing - only what's actually needed
 # poppler-utils: For PDF processing
