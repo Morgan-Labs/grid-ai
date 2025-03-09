@@ -83,7 +83,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
 
 # Install the project with all PDF processing dependencies including Textract and GPT-4o
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-index -e ".[pdf-all]" && \
+    pip install -e ".[pdf-all]" && \
     # Only install spaCy model if absolutely needed by unstructured
     if pip show unstructured | grep -q "spacy"; then \
         python -m spacy download en_core_web_sm --no-deps; \
