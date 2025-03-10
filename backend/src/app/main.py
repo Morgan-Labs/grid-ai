@@ -33,6 +33,7 @@ app.add_middleware(
     allow_origins=[
         "https://ai-grid-ik5o.onrender.com",
         "https://ai-grid-backend-jvru.onrender.com",
+        "https://grid.mx2.dev",
         "http://localhost:3000",
         "http://localhost:5173",
         "http://localhost:8000",

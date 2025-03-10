@@ -223,7 +223,7 @@ export function KtColumnSettings({
         />
         <Group gap="xs" wrap="nowrap">
           <Tooltip label="Rerun column">
-            <ActionIcon onClick={onRerun}>
+            <ActionIcon color="green" onClick={onRerun}>
               <IconRefresh />
             </ActionIcon>
           </Tooltip>
