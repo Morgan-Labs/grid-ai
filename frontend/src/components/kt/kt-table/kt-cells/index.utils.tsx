@@ -8,6 +8,13 @@ import classes from "./index.module.css";
 // Add global handlers to manage popovers
 // This is done once at the module level to avoid adding multiple listeners
 let isGlobalHandlersAdded = false;
+let mentionSuggestionActive = false; // Track if mention suggestion is active
+
+// Expose a function to set the active state
+export function setMentionSuggestionActive(active: boolean) {
+  mentionSuggestionActive = active;
+}
+
 const setupGlobalHandlers = () => {
   if (isGlobalHandlersAdded) return;
   
@@ -20,46 +27,58 @@ const setupGlobalHandlers = () => {
     const store = useStore.getState();
     if (!store.activePopoverId) return;
     
+    // If mention suggestion is active, don't close popover
+    if (mentionSuggestionActive) {
+      return;
+    }
+    
     // Check if the click is inside the active popover's dropdown or target
     const isInsidePopover = !!(e.target as Element).closest(`.${classes.dropdown}`) || 
                             !!(e.target as Element).closest(`.${classes.target}`);
     
-    // Check if the click is inside any Mantine component
-    const isInsideMantineMenu = (function() {
-      // Check the target element itself
+    // Check for specific mention suggestion elements that should not close the popover
+    const isInsideMentionSuggestions = (function() {
       const targetEl = e.target as Element;
       
-      // If the target has any class containing "mantine" or has stop propagation attribute
-      if (Array.from(targetEl.classList || []).some(cls => cls.includes('mantine')) ||
-          targetEl.hasAttribute('data-mantine-stop-propagation')) {
-        return true;
-      }
-      
-      // Check all parent elements up to the document root
+      // Check if the click is directly on a mention suggestion item
+      // or any of its parent elements up to the suggestions list
       let currentEl: Element | null = targetEl;
       while (currentEl) {
-        // Check if the element has any class containing "mantine"
-        if (currentEl.classList && Array.from(currentEl.classList).some(cls => cls.includes('mantine'))) {
+        // Check for specific class names seen in the HTML structure
+        if (currentEl.classList) {
+          // These are the specific classes used in the mentions suggestion list
+          if (currentEl.classList.contains('mentions__suggestions__item') || 
+              currentEl.classList.contains('mentions__suggestions__list') ||
+              currentEl.classList.contains('_suggestion_dyb3w_38') ||
+              currentEl.classList.contains('_active_dyb3w_44')) {
+            return true;
+          }
+        }
+        
+        // Also check for specific role attributes
+        const role = currentEl.getAttribute('role');
+        if (role === 'option' || role === 'listbox') {
           return true;
         }
         
-        // Check for data attributes that Mantine uses or stop propagation attribute
-        if (currentEl.hasAttribute('data-menu-dropdown') || 
-            currentEl.hasAttribute('data-menu-item') || 
-            currentEl.hasAttribute('data-position') ||
-            currentEl.hasAttribute('data-mantine-stop-propagation')) {
+        // Look for specific parent elements that might contain mentions
+        if (currentEl.tagName === 'UL' && currentEl.hasAttribute('id') && 
+            currentEl.getAttribute('id')?.includes('mentions')) {
           return true;
         }
         
-        // Move up to the parent element
+        // Move up to parent
         currentEl = currentEl.parentElement;
       }
       
       return false;
     })();
     
-    // If click is inside the popover or a Mantine Menu, don't close it
-    if (isInsidePopover || isInsideMantineMenu) return;
+    // If click is inside the popover or mention suggestions, don't close it
+    if (isInsidePopover || isInsideMentionSuggestions) {
+      // console.log("Click inside popover or mention suggestions, not closing");
+      return;
+    }
     
     // If click is outside, close the popover
     store.setActivePopover(null);

@@ -25,6 +25,12 @@
 
     .mentions__suggestions {
       background-color: transparent !important;
+      z-index: 1001 !important;
+    }
+    
+    /* This div is created by react-mentions and holds the suggestions list */
+    div[class^="react-mentions"] {
+      z-index: 1001 !important;
     }
   }
 }

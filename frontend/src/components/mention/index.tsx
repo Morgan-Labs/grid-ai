@@ -72,7 +72,12 @@ export function Mention({
 
   // Create a memoized handler for suggestions container to prevent unnecessary re-renders
   const renderSuggestionsContainer = useCallback((node: React.ReactNode) => (
-    <Paper withBorder shadow="sm" p={4}>
+    <Paper 
+      withBorder 
+      shadow="sm" 
+      p={4}
+      style={{ zIndex: 1001 }}
+    >
       {node}
     </Paper>
   ), []);
