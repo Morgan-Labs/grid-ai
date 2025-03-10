@@ -8,20 +8,34 @@ FROM python:3.12.1-slim-bookworm AS builder
 WORKDIR /usr/src/app
 
 # Install system dependencies - only what's needed for building wheels
-RUN apt-get update && \
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update
+
+RUN --mount=type=cache,target=/var/cache/apt \
     apt-get install -y --no-install-recommends build-essential && \
     rm -rf /var/lib/apt/lists/*
 
-# Install specific pydantic versions first (as specified in pyproject.toml)
-RUN pip install --no-cache-dir pydantic==2.10.6 pydantic-core==2.27.2
-RUN pip install --upgrade pip setuptools wheel
+# Install python dependencies
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip setuptools wheel
 
-# Copy only the requirements-related files first for better caching
+# Copy only the requirements-related files first
 COPY pyproject.toml ./
 
-# Install python dependencies to generate wheels
-RUN pip wheel --no-deps --wheel-dir /usr/src/app/wheels -r <(pip install tomli && python -c "import tomli; f = open('pyproject.toml', 'rb'); data = tomli.load(f); print('\n'.join(data['project']['dependencies']))") && \
-    pip wheel --no-deps --wheel-dir /usr/src/app/wheels 'pymupdf>=1.23.0' 'pypdf>=3.15.1' 'unstructured[pdf]' 'pdf2image>=1.16.3' 'pytesseract>=0.3.10' 'boto3>=1.34.0' 'amazon-textract-caller>=0.2.0' 'langchain-openai>=0.2.0' 'openai>=1.45.1' 'pillow>=10.0.0'
+# Create a requirements.txt file with only the essential dependencies
+RUN pip install tomli && \
+    python -c "import tomli; import json; f = open('pyproject.toml', 'rb'); data = tomli.load(f); essential = [d for d in data['project']['dependencies'] if any(pkg in d.lower() for pkg in ['fastapi', 'uvicorn', 'pydantic', 'langchain', 'openai', 'pymilvus', 'pypdf', 'python-multipart'])]; print('\n'.join(essential))" > requirements.txt
+
+# Install only essential dependencies to create wheels
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip wheel --no-deps --wheel-dir /usr/src/app/wheels -r requirements.txt
+
+# Copy source code
+COPY src ./src
+
+# Create wheel for the project
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip wheel --no-deps --wheel-dir /usr/src/app/wheels -e .
 
 # Final stage
 FROM python:3.12.1-slim-bookworm
@@ -38,13 +52,26 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Copy wheels from builder stage
+# Copy wheels and install dependencies
 COPY --from=builder /usr/src/app/wheels /wheels
+COPY --from=builder /usr/src/app/src ./src
 COPY pyproject.toml ./
 
-# Install system dependencies for PDF processing
-# All in a single RUN command to avoid lock issues
-RUN apt-get update && \
+# Install dependencies with conflict resolution
+RUN pip install --no-cache-dir --no-deps /wheels/* && \
+    pip install --no-cache-dir pydantic==2.10.6 pydantic-core==2.27.2
+
+# Install system dependencies for PDF processing - only what's actually needed
+# poppler-utils: For PDF processing
+# libmagic1: For file type detection
+# libgl1: For image processing
+# libglib2.0-0: Required by PyMuPDF
+# tesseract-ocr: For OCR (only if needed)
+# tesseract-ocr-eng: English language for OCR
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update
+
+RUN --mount=type=cache,target=/var/cache/apt \
     apt-get install -y --no-install-recommends \
     poppler-utils \
     libmagic1 \
@@ -52,19 +79,21 @@ RUN apt-get update && \
     libglib2.0-0 \
     tesseract-ocr \
     tesseract-ocr-eng && \
-    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install dependencies from wheels
-RUN pip install --no-cache-dir --no-index --find-links=/wheels /wheels/* && \
-    rm -rf /wheels
-
-# Copy source code (which changes most frequently) last for better caching
-COPY src ./src
+# Install the project with all PDF processing dependencies including Textract and GPT-4o
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -e ".[pdf-all]" && \
+    # Only install spaCy model if absolutely needed by unstructured
+    if pip show unstructured | grep -q "spacy"; then \
+        python -m spacy download en_core_web_sm --no-deps; \
+    fi
 
 # Create data directory and set permissions
-RUN mkdir -p /data && chown -R appuser:appuser /data && chmod 777 /data && \
-    chown -R appuser:appuser /usr/src/app
+RUN mkdir -p /data && chown -R appuser:appuser /data && chmod 777 /data
+
+# Change ownership of the app directory
+RUN chown -R appuser:appuser /usr/src/app
 
 # Switch to non-root user
 USER appuser
