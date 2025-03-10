@@ -1,45 +1,29 @@
 # syntax=docker/dockerfile:1.4
 # Enable BuildKit features
 
-##############################
-# STEP 1: Dependencies Layer
-##############################
-FROM python:3.12.1-slim-bookworm AS dependencies
+# Build stage
+FROM python:3.12.1-slim-bookworm AS builder
 
 # Set working directory
 WORKDIR /usr/src/app
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=0 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# Install system build dependencies - these are only needed for building packages
-RUN --mount=type=cache,target=/var/cache/apt \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-    build-essential && \
+# Install system dependencies - only what's needed for building wheels
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential && \
     rm -rf /var/lib/apt/lists/*
 
-# IMPORTANT: Copy only pyproject.toml for optimal caching
-# This layer will remain cached unless pyproject.toml changes
+# Install specific pydantic versions first (as specified in pyproject.toml)
+RUN pip install --no-cache-dir pydantic==2.10.6 pydantic-core==2.27.2
+RUN pip install --upgrade pip setuptools wheel
+
+# Copy only the requirements-related files first for better caching
 COPY pyproject.toml ./
 
-# Install dependencies with specific pydantic versions
-# This will be cached as long as pyproject.toml doesn't change
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade pip setuptools wheel && \
-    # Using the version constraints from pyproject.toml
-    pip install -e ".[pdf-all]" && \
-    # Only install spaCy model if needed by unstructured
-    if pip show unstructured | grep -q "spacy"; then \
-        python -m spacy download en_core_web_sm --no-deps; \
-    fi
+# Install python dependencies to generate wheels
+RUN pip wheel --no-deps --wheel-dir /usr/src/app/wheels -r <(pip install tomli && python -c "import tomli; f = open('pyproject.toml', 'rb'); data = tomli.load(f); print('\n'.join(data['project']['dependencies']))") && \
+    pip wheel --no-deps --wheel-dir /usr/src/app/wheels 'pymupdf>=1.23.0' 'pypdf>=3.15.1' 'unstructured[pdf]' 'pdf2image>=1.16.3' 'pytesseract>=0.3.10' 'boto3>=1.34.0' 'amazon-textract-caller>=0.2.0' 'langchain-openai>=0.2.0' 'openai>=1.45.1' 'pillow>=10.0.0'
 
-##############################
-# STEP 2: Final Image
-##############################
+# Final stage
 FROM python:3.12.1-slim-bookworm
 
 # Create a non-root user
@@ -51,11 +35,15 @@ WORKDIR /usr/src/app
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=0 \
+    PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install ONLY system runtime dependencies in a single apt-get command
-# to avoid lock issues in cloud environments like Render
+# Copy wheels from builder stage
+COPY --from=builder /usr/src/app/wheels /wheels
+COPY pyproject.toml ./
+
+# Install system dependencies for PDF processing
+# All in a single RUN command to avoid lock issues
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     poppler-utils \
@@ -67,19 +55,14 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy installed Python packages from dependencies stage
-# This avoids reinstalling packages with every build
-COPY --from=dependencies /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=dependencies /usr/local/bin /usr/local/bin
-
-# Copy pyproject.toml for package metadata
-COPY pyproject.toml ./
+# Install dependencies from wheels
+RUN pip install --no-cache-dir --no-index --find-links=/wheels /wheels/* && \
+    rm -rf /wheels
 
 # Copy source code (which changes most frequently) last for better caching
-# This is the step that will run on most code changes
 COPY src ./src
 
-# Create data directory with correct permissions
+# Create data directory and set permissions
 RUN mkdir -p /data && chown -R appuser:appuser /data && chmod 777 /data && \
     chown -R appuser:appuser /usr/src/app
 
