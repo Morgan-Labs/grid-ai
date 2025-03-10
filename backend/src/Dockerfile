@@ -89,8 +89,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
         python -m spacy download en_core_web_sm --no-deps; \
     fi
 
-# Create data directory and set permissions
-RUN mkdir -p /data && chown -R appuser:appuser /data && chmod 777 /data
+# Create data and temp directories with proper permissions
+RUN mkdir -p /data && mkdir -p /tmp/ai_grid_documents && \
+    chmod -R 777 /data && chmod -R 777 /tmp && \
+    chown -R appuser:appuser /data && chown -R appuser:appuser /tmp/ai_grid_documents
 
 # Change ownership of the app directory
 RUN chown -R appuser:appuser /usr/src/app

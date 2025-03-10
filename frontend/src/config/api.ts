@@ -112,20 +112,73 @@ export const uploadFile = async (file: File): Promise<any> => {
   
   console.log('Uploading file to:', API_ENDPOINTS.DOCUMENT_UPLOAD);
   
+  // Create a controller for timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for uploads
+  
   try {
+    // Make a preflight OPTIONS request first to ensure CORS is set up
+    try {
+      console.log('Sending preflight OPTIONS request');
+      const preflightResponse = await fetch(API_ENDPOINTS.DOCUMENT_UPLOAD, {
+        method: 'OPTIONS',
+        headers: {
+          'Origin': window.location.origin,
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers': 'Content-Type, Authorization'
+        },
+        mode: 'cors'
+      });
+      
+      console.log('OPTIONS response status:', preflightResponse.status);
+    } catch (preflightError) {
+      console.warn('OPTIONS preflight request failed:', preflightError);
+      // Continue anyway - the actual request might still work
+    }
+    
+    // Make the actual upload request
     const response = await fetch(API_ENDPOINTS.DOCUMENT_UPLOAD, {
       method: 'POST',
       body: formData,
       credentials: 'include',
-      headers: getUploadHeaders()
+      headers: getUploadHeaders(),
+      signal: controller.signal,
+      mode: 'cors'
     });
     
+    // Clear the timeout
+    clearTimeout(timeoutId);
+    
+    console.log('Upload response status:', response.status);
+    console.log('Upload response headers:', 
+      Array.from(response.headers.entries())
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(', ')
+    );
+    
     if (!response.ok) {
-      throw new ApiError(`Failed to upload file: ${response.statusText}`, response.status);
+      // Try to get more error information
+      let errorDetails = response.statusText;
+      try {
+        const errorText = await response.text();
+        errorDetails = errorText || errorDetails;
+      } catch (e) {
+        // Ignore error reading the error response
+      }
+      
+      throw new ApiError(`Failed to upload file: ${errorDetails}`, response.status);
     }
     
     return response.json();
   } catch (error) {
+    // Clean up timeout if there's an error
+    clearTimeout(timeoutId);
+    
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error('Upload timed out after 2 minutes');
+      throw new ApiError('Upload timed out after 2 minutes', 408);
+    }
+    
     console.error('Error uploading file:', error);
     throw error;
   }
@@ -140,20 +193,68 @@ export const uploadFiles = async (files: File[]): Promise<any> => {
   
   console.log(`Uploading ${files.length} files in batch to:`, API_ENDPOINTS.BATCH_DOCUMENT_UPLOAD);
   
+  // Create a controller for timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minute timeout for batch uploads
+  
   try {
+    // Make a preflight OPTIONS request first to ensure CORS is set up
+    try {
+      console.log('Sending batch preflight OPTIONS request');
+      const preflightResponse = await fetch(API_ENDPOINTS.BATCH_DOCUMENT_UPLOAD, {
+        method: 'OPTIONS',
+        headers: {
+          'Origin': window.location.origin,
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers': 'Content-Type, Authorization'
+        },
+        mode: 'cors'
+      });
+      
+      console.log('Batch OPTIONS response status:', preflightResponse.status);
+    } catch (preflightError) {
+      console.warn('Batch OPTIONS preflight request failed:', preflightError);
+      // Continue anyway - the actual request might still work
+    }
+    
+    // Make the actual upload request
     const response = await fetch(API_ENDPOINTS.BATCH_DOCUMENT_UPLOAD, {
       method: 'POST',
       body: formData,
       credentials: 'include',
-      headers: getUploadHeaders()
+      headers: getUploadHeaders(),
+      signal: controller.signal,
+      mode: 'cors'
     });
     
+    // Clear the timeout
+    clearTimeout(timeoutId);
+    
+    console.log('Batch upload response status:', response.status);
+    
     if (!response.ok) {
-      throw new ApiError(`Failed to upload files: ${response.statusText}`, response.status);
+      // Try to get more error information
+      let errorDetails = response.statusText;
+      try {
+        const errorText = await response.text();
+        errorDetails = errorText || errorDetails;
+      } catch (e) {
+        // Ignore error reading the error response
+      }
+      
+      throw new ApiError(`Failed to upload files: ${errorDetails}`, response.status);
     }
     
     return response.json();
   } catch (error) {
+    // Clean up timeout if there's an error
+    clearTimeout(timeoutId);
+    
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error('Batch upload timed out after 3 minutes');
+      throw new ApiError('Batch upload timed out after 3 minutes', 408);
+    }
+    
     console.error('Error uploading files:', error);
     throw error;
   }

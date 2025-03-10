@@ -5,7 +5,7 @@ import logging
 import time
 from typing import List
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, Request, Response
 
 from app.core.dependencies import get_document_service
 from app.models.document import Document
@@ -21,6 +21,48 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Document"])
 
+@router.options(
+    "",
+    status_code=200,
+)
+async def options_document_endpoint(
+    request: Request,
+    response: Response,
+):
+    """
+    Handle preflight OPTIONS requests for document uploads.
+    """
+    # Set CORS headers for preflight request
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+        response.headers["Access-Control-Max-Age"] = "1800"  # Cache preflight for 30 minutes
+    return {}
+
+@router.options(
+    "/batch",
+    status_code=200,
+)
+async def options_batch_document_endpoint(
+    request: Request,
+    response: Response,
+):
+    """
+    Handle preflight OPTIONS requests for batch document uploads.
+    """
+    # Set CORS headers for preflight request
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+        response.headers["Access-Control-Max-Age"] = "1800"  # Cache preflight for 30 minutes
+    return {}
+
 
 @router.post(
     "",
@@ -28,6 +70,8 @@ router = APIRouter(tags=["Document"])
     status_code=status.HTTP_201_CREATED,
 )
 async def upload_document_endpoint(
+    request: Request,
+    response: Response,
     file: UploadFile = File(...),
     document_service: DocumentService = Depends(get_document_service),
 ) -> DocumentResponseSchema:
@@ -51,6 +95,13 @@ async def upload_document_endpoint(
     HTTPException
         If the file name is missing or if an error occurs during processing.
     """
+    # Ensure CORS headers are present
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -113,6 +164,8 @@ async def upload_document_endpoint(
     status_code=status.HTTP_201_CREATED,
 )
 async def batch_upload_documents_endpoint(
+    request: Request,
+    response: Response,
     files: List[UploadFile] = File(...),
     document_service: DocumentService = Depends(get_document_service),
 ) -> BatchUploadResponseSchema:
@@ -136,6 +189,13 @@ async def batch_upload_documents_endpoint(
     HTTPException
         If an error occurs during processing.
     """
+    # Ensure CORS headers are present
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     if not files:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -201,6 +261,8 @@ async def batch_upload_documents_endpoint(
 
 @router.delete("/{document_id}", response_model=DeleteDocumentResponseSchema)
 async def delete_document_endpoint(
+    request: Request,
+    response: Response,
     document_id: str,
     document_service: DocumentService = Depends(get_document_service),
 ) -> DeleteDocumentResponseSchema:
@@ -224,6 +286,13 @@ async def delete_document_endpoint(
     HTTPException
         If an error occurs during the deletion process.
     """
+    # Ensure CORS headers are present
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     try:
         result = await document_service.delete_document(document_id)
         if result:
@@ -250,6 +319,8 @@ async def delete_document_endpoint(
 
 @router.get("/{document_id}/preview", response_model=DocumentPreviewResponseSchema)
 async def preview_document_text(
+    request: Request,
+    response: Response,
     document_id: str,
     document_service: DocumentService = Depends(get_document_service),
 ) -> DocumentPreviewResponseSchema:
@@ -273,6 +344,13 @@ async def preview_document_text(
     HTTPException
         If an error occurs during the preview process.
     """
+    # Ensure CORS headers are present
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     logger.info(f"Document text preview requested for document_id: {document_id}")
     try:
         logger.info("Retrieving document chunks from vector database")
