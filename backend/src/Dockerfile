@@ -24,9 +24,9 @@ RUN --mount=type=cache,target=/var/cache/apt \
 
 # IMPORTANT: Copy only pyproject.toml for optimal caching
 # This layer will remain cached unless pyproject.toml changes
-COPY backend/pyproject.toml ./pyproject.toml
+COPY pyproject.toml ./
 
-# Install dependencies - using the versions from pyproject.toml
+# Install dependencies with specific pydantic versions
 # This will be cached as long as pyproject.toml doesn't change
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip setuptools wheel && \
@@ -73,11 +73,11 @@ COPY --from=dependencies /usr/local/lib/python3.12/site-packages /usr/local/lib/
 COPY --from=dependencies /usr/local/bin /usr/local/bin
 
 # Copy pyproject.toml for package metadata
-COPY backend/pyproject.toml ./pyproject.toml
+COPY pyproject.toml ./
 
 # Copy source code (which changes most frequently) last for better caching
 # This is the step that will run on most code changes
-COPY backend/src ./src
+COPY src ./src
 
 # Create data directory with correct permissions
 RUN mkdir -p /data && chown -R appuser:appuser /data && chmod 777 /data && \
