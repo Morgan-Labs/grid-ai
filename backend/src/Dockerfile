@@ -54,10 +54,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=0 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install ONLY system runtime dependencies
-# These are needed for running the app, not building packages
-RUN --mount=type=cache,target=/var/cache/apt \
-    apt-get update && \
+# Install ONLY system runtime dependencies in a single apt-get command
+# to avoid lock issues in cloud environments like Render
+RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     poppler-utils \
     libmagic1 \
@@ -65,6 +64,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
     libglib2.0-0 \
     tesseract-ocr \
     tesseract-ocr-eng && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy installed Python packages from dependencies stage
