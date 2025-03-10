@@ -37,8 +37,8 @@ app.add_middleware(
         "http://localhost:5173",
         "http://localhost:8000",
         "http://localhost:8001",
-        # Add wildcard as fallback
-        "*"
+        # Do not use wildcard with credentials - browsers reject it
+        # "*"
     ],
     allow_origin_regex=r"https://(.*\.)?ai-grid\.onrender\.com",
     allow_credentials=True,
@@ -69,9 +69,11 @@ class EnsureCORSMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             
             # Ensure CORS headers are present
-            origin = request.headers.get("Origin", "*")
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
+            origin = request.headers.get("Origin")
+            if origin:
+                # Only set specific origin, not wildcard, when credentials are used
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
             
             # For preflight requests
             if request.method == "OPTIONS":
@@ -85,8 +87,10 @@ class EnsureCORSMiddleware(BaseHTTPMiddleware):
             if str(e) == "No response returned.":
                 # Create a new response with CORS headers
                 response = Response(status_code=204)  # No Content
-                response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
-                response.headers["Access-Control-Allow-Credentials"] = "true"
+                origin = request.headers.get("Origin")
+                if origin:
+                    response.headers["Access-Control-Allow-Origin"] = origin
+                    response.headers["Access-Control-Allow-Credentials"] = "true"
                 response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
                 response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
                 return response
