@@ -1,4 +1,4 @@
-"""OpenAI completion service implementation."""
+"""OpenAI completion service implementation with Portkey integration."""
 
 import asyncio
 import logging
@@ -7,6 +7,7 @@ from typing import Any, Optional, Type
 
 from openai import OpenAI
 from pydantic import BaseModel
+from portkey_ai import PORTKEY_GATEWAY_URL, createHeaders
 
 from app.core.config import Settings
 from app.services.llm.base import CompletionService
@@ -27,7 +28,33 @@ class OpenAICompletionService(CompletionService):
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         if settings.openai_api_key:
-            self.client = OpenAI(api_key=settings.openai_api_key)
+            # Check if Portkey integration is enabled
+            if settings.portkey_enabled and settings.portkey_api_key:
+                metadata = {
+                    "_user": "grid",
+                    "service": "ai-grid",
+                }
+                # Configure Portkey headers
+                headers = createHeaders(
+                    api_key=settings.portkey_api_key,
+                    provider="openai",
+                    metadata=metadata,
+                    config="pc-ai-gri-f2471b",
+                )
+                
+                # Use Portkey gateway URL if provided, otherwise use the default
+                base_url = settings.portkey_gateway_url or PORTKEY_GATEWAY_URL
+                
+                # Initialize OpenAI client with Portkey configuration
+                self.client = OpenAI(
+                    api_key=settings.openai_api_key,
+                    base_url=base_url,
+                    default_headers=headers
+                )
+                logger.info("OpenAI client initialized with Portkey integration")
+            else:
+                self.client = OpenAI(api_key=settings.openai_api_key)
+                logger.info("OpenAI client initialized without Portkey integration")
         else:
             self.client = None  # type: ignore
             logger.warning(

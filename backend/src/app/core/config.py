@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     llm_provider: str = "openai"
     llm_model: str = "gpt-4o"
     openai_api_key: Optional[str] = None
+    
+    # PORTKEY CONFIG
+    portkey_api_key: Optional[str] = None
+    portkey_gateway_url: Optional[str] = None
+    portkey_enabled: bool = False
 
     # VECTOR DATABASE CONFIG
     vector_db_provider: str = "milvus"
@@ -143,6 +148,13 @@ def get_settings() -> Settings:
         logger.info("OpenAI API key is set")
     else:
         logger.warning("OpenAI API key is not set")
+    
+    # Check if Portkey is configured
+    if settings.portkey_api_key:
+        logger.info("Portkey API key is set")
+        settings.portkey_enabled = True
+    else:
+        logger.info("Portkey API key is not set, Portkey integration is disabled")
     
     # # Debug log to check vector db provider and Qdrant configuration
     # logger.info(f"Vector DB provider: {settings.vector_db_provider}")

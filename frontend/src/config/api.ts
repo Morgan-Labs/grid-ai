@@ -847,9 +847,9 @@ async function processIndividualQuery(query: any): Promise<any> {
  * Process a batch of queries using the batch API endpoint with optimized timeout
  */
 async function processBatch(batch: any[]): Promise<any[]> {
-  // Optimized timeout calculation - faster for smaller batches
-  // Base: 20s + 3s per query, capped at 45s (reduced from 60s)
-  const timeoutMs = Math.min(45000, 20000 + (batch.length * 3000));
+  // Optimized timeout calculation with moderately increased values
+  // Base: 30s + 4s per query, capped at 60s
+  const timeoutMs = Math.min(60000, 30000 + (batch.length * 4000));
   
   console.log(`Processing batch of ${batch.length} queries with ${timeoutMs}ms timeout`);
   
