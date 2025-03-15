@@ -73,8 +73,9 @@ class Settings(BaseSettings):
     dimensions: int = 1536
     embedding_provider: str = "openai"
     embedding_model: str = "text-embedding-3-small"
-    llm_provider: str = "openai"
-    llm_model: str = "gpt-4o"
+    llm_provider: str = "portkey"  # Options: openai, anthropic, gemini
+    llm_model: str = "gpt-4o"  # Model name depends on the provider
+    llm_virtual_key: Optional[str] = None  # Portkey virtual key for the selected provider/model
     openai_api_key: Optional[str] = None
     
     # PORTKEY CONFIG

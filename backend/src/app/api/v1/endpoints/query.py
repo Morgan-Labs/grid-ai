@@ -7,9 +7,9 @@ import uuid
 from typing import Dict, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.middleware.cors import CORSMiddleware
 
-from app.core.dependencies import get_llm_service, get_vector_db_service
+from app.core.dependencies import get_llm_service, get_vector_db_service, get_settings
+from app.core.config import Settings
 from app.schemas.query_api import (
     QueryAnswer,
     QueryAnswerResponse,
@@ -33,11 +33,100 @@ router = APIRouter(tags=["query"])
 logger.info("Query router initialized")
 
 
+def configure_llm_service(
+    llm_service: CompletionService, 
+    settings: Settings,
+    model: str,
+    provider: str = None,
+) -> CompletionService:
+    """Configure the LLM service based on model and provider.
+    
+    Parameters
+    ----------
+    llm_service : CompletionService
+        The language model service to configure.
+    settings : Settings
+        Application settings.
+    model : str
+        The model to use.
+    provider : str, optional
+        The provider to use. If None, it will be detected from the model name.
+        
+    Returns
+    -------
+    CompletionService
+        The configured LLM service.
+    """
+    # Set model in settings
+    settings.llm_model = model
+    
+    # Auto-detect provider from model name if not provided
+    if not provider:
+        if "claude" in model.lower():
+            provider = "anthropic"
+        elif "gemini" in model.lower():
+            provider = "gemini"
+        elif "gpt" in model.lower():
+            provider = "openai"
+        else:
+            provider = "openai"  # Default to OpenAI
+    
+    # Get the appropriate virtual key based on provider
+    provider_keys = {
+        "anthropic": "anthropic-a27fda",
+        "gemini": "gemini-3161fc", 
+        "openai": "openai-6a3e17"
+    }
+    
+    virtual_key = provider_keys.get(provider)
+    
+    # For non-OpenAI providers, always use Portkey
+    if provider != "openai":
+        # Set provider to portkey in settings
+        settings.llm_provider = "portkey"
+        
+        # Create a new Portkey service
+        from app.services.llm.factory import CompletionServiceFactory
+        llm_service = CompletionServiceFactory.create_service(settings)
+        
+        # Configure virtual key and model
+        if hasattr(llm_service, 'update_virtual_key'):
+            try:
+                logger.info(f"Setting virtual key for {provider}: {virtual_key} with model: {model}")
+                llm_service.update_virtual_key(virtual_key, provider, model)
+            except Exception as e:
+                logger.error(f"Error setting virtual key: {str(e)}")
+    
+    # For OpenAI, we can either use direct OpenAI integration or Portkey
+    else:
+        # If we want to use Portkey for OpenAI too (for tracking/routing)
+        if settings.portkey_enabled:
+            settings.llm_provider = "portkey"
+            from app.services.llm.factory import CompletionServiceFactory
+            llm_service = CompletionServiceFactory.create_service(settings)
+            
+            # Configure virtual key and model for OpenAI through Portkey
+            if hasattr(llm_service, 'update_virtual_key'):
+                try:
+                    logger.info(f"Setting virtual key for OpenAI: {virtual_key} with model: {model}")
+                    llm_service.update_virtual_key(virtual_key, provider, model)
+                except Exception as e:
+                    logger.error(f"Error setting virtual key: {str(e)}")
+        else:
+            # Use direct OpenAI integration
+            settings.llm_provider = "openai"
+            from app.services.llm.factory import CompletionServiceFactory
+            llm_service = CompletionServiceFactory.create_service(settings)
+    
+    return llm_service
+
+
 @router.post("", response_model=QueryAnswerResponse)
 async def run_query(
     request: QueryRequestSchema,
     llm_service: CompletionService = Depends(get_llm_service),
     vector_db_service: VectorDBService = Depends(get_vector_db_service),
+    settings: Settings = Depends(get_settings),
 ) -> QueryAnswerResponse:
     """
     Run a query and generate a response.
@@ -65,83 +154,67 @@ async def run_query(
     HTTPException
         If there's an error processing the query.
     """
-    if request.document_id == "00000000000000000000000000000000":
-        try:
+    # Log the incoming request parameters
+    logger.info("📝 QUERY REQUEST PARAMETERS:")
+    logger.info(f"📝 Document ID: {request.document_id}")
+    logger.info(f"📝 Query: {request.prompt.query}")
+    logger.info(f"📝 Type: {request.prompt.type}")
+    logger.info(f"📝 LLM Model: {request.prompt.llm_model or 'Default'}")
+    logger.info(f"📝 LLM Provider: {request.prompt.llm_provider or 'Auto-detected'}")
+    logger.info(f"📝 Rules: {len(request.prompt.rules)} rules")
+    
+    # Store original settings to restore later
+    original_provider = settings.llm_provider
+    original_model = settings.llm_model
+    
+    # Configure LLM service if custom model is specified
+    if request.prompt.llm_model:
+        logger.info(f"🔄 Configuring LLM service for model: {request.prompt.llm_model}")
+        llm_service = configure_llm_service(
+            llm_service, 
+            settings, 
+            request.prompt.llm_model, 
+            request.prompt.llm_provider
+        )
+        logger.info(f"✅ LLM service configured - Provider: {settings.llm_provider}, Model: {settings.llm_model}")
+    
+    try:
+        # Handle inference queries (no document)
+        if request.document_id == "00000000000000000000000000000000":
             query_response = await inference_query(
                 request.prompt.query,
                 request.prompt.rules,
                 request.prompt.type,
                 llm_service,
             )
-
-            if not isinstance(query_response, QueryResult):
-                query_response = QueryResult(**query_response)
-
-            answer = QueryAnswer(
-                id=uuid.uuid4().hex,
-                document_id=request.document_id,
-                prompt_id=request.prompt.id,
-                answer=query_response.answer,
-                type=request.prompt.type,
-            )
-            response_data = QueryAnswerResponse(
-                answer=answer, 
-                chunks=query_response.chunks or [],
-                resolved_entities=query_response.resolved_entities or []
+        else:
+            # Determine query type
+            query_type = (
+                "hybrid"
+                if request.prompt.rules or request.prompt.type == "bool"
+                else "vector"
             )
 
-            return response_data
-        except Exception as e:
-            logger.error(f"Error in inference query: {str(e)}")
-            # Create a type-appropriate fallback
-            if request.prompt.type == "int":
-                fallback = 0
-            elif request.prompt.type == "bool":
-                fallback = False
-            elif request.prompt.type == "int_array":
-                fallback = []
-            elif request.prompt.type == "str_array":
-                fallback = []
-            else:
-                fallback = f"Error processing query"
-                
-            answer = QueryAnswer(
-                id=uuid.uuid4().hex,
-                document_id=request.document_id,
-                prompt_id=request.prompt.id,
-                answer=fallback,
-                type=request.prompt.type,
+            query_functions = {
+                "decomposed": decomposition_query,
+                "hybrid": hybrid_query,
+                "vector": simple_vector_query,
+            }
+
+            query_response = await query_functions[query_type](
+                request.prompt.query,
+                request.document_id,
+                request.prompt.rules,
+                request.prompt.type,
+                llm_service,
+                vector_db_service,
             )
-            return QueryAnswerResponse(answer=answer, chunks=[], resolved_entities=[])
 
-    try:
-        logger.info(f"Received query request: {request}")
-
-        # Determine query type
-        query_type = (
-            "hybrid"
-            if request.prompt.rules or request.prompt.type == "bool"
-            else "vector"
-        )
-
-        query_functions = {
-            "decomposed": decomposition_query,
-            "hybrid": hybrid_query,
-            "vector": simple_vector_query,
-        }
-
-        query_response = await query_functions[query_type](
-            request.prompt.query,
-            request.document_id,
-            request.prompt.rules,
-            request.prompt.type,
-            llm_service,
-            vector_db_service,
-        )
-
+        # Convert to QueryResult if needed
         if not isinstance(query_response, QueryResult):
             query_response = QueryResult(**query_response)
 
+        # Create answer
         answer = QueryAnswer(
             id=uuid.uuid4().hex,
             document_id=request.document_id,
@@ -149,7 +222,8 @@ async def run_query(
             answer=query_response.answer,
             type=request.prompt.type,
         )
-        # Include resolved_entities in the response
+        
+        # Create response
         response_data = QueryAnswerResponse(
             answer=answer,
             chunks=query_response.chunks or [],
@@ -172,11 +246,29 @@ async def run_query(
         )
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
-        error_detail = str(e) if str(e) else "Internal server error"
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=error_detail
+        
+        # Create a type-appropriate fallback
+        if request.prompt.type == "int":
+            fallback = 0
+        elif request.prompt.type == "bool":
+            fallback = False
+        elif request.prompt.type == "int_array" or request.prompt.type == "str_array":
+            fallback = []
+        else:
+            fallback = f"Error processing query"
+            
+        answer = QueryAnswer(
+            id=uuid.uuid4().hex,
+            document_id=request.document_id,
+            prompt_id=request.prompt.id,
+            answer=fallback,
+            type=request.prompt.type,
         )
+        return QueryAnswerResponse(answer=answer, chunks=[], resolved_entities=[])
+    finally:
+        # Restore original settings
+        settings.llm_provider = original_provider
+        settings.llm_model = original_model
 
 
 @router.post("/batch", response_model=List[QueryAnswerResponse])
@@ -186,6 +278,7 @@ async def run_batch_queries(
     requests: List[QueryRequestSchema],
     llm_service: CompletionService = Depends(get_llm_service),
     vector_db_service: VectorDBService = Depends(get_vector_db_service),
+    settings: Settings = Depends(get_settings),
 ) -> List[QueryAnswerResponse]:
     """
     Run multiple queries in parallel with optimized processing for faster initial responses.
@@ -223,44 +316,63 @@ async def run_batch_queries(
         start_time = time.time()
         logger.info(f"Received batch query request with {len(requests)} queries")
         
-        # Prioritize and categorize queries for optimal processing
+        # Store original settings to restore later
+        original_provider = settings.llm_provider
+        original_model = settings.llm_model
+        
+        # Categorize queries by complexity for prioritized processing
         inference_requests = []
         simple_vector_requests = []
         complex_vector_requests = []
         
-        # Categorize queries by complexity for prioritized processing
         for req in requests:
             if req.document_id == "00000000000000000000000000000000":
                 inference_requests.append(req)
             elif not req.prompt.rules and req.prompt.type != "bool":
-                # Simple vector queries are faster
                 simple_vector_requests.append(req)
             else:
-                # Complex queries with rules or boolean outputs
                 complex_vector_requests.append(req)
         
         # Pre-allocate results array with the exact size needed
         results = [None] * len(requests)
-        request_to_index = {}
+        request_to_index = {id(req): i for i, req in enumerate(requests)}
         
-        # Map requests to their original indices
-        for i, req in enumerate(requests):
-            request_to_index[id(req)] = i
-        
-        # Process simple queries first to get initial results faster
+        # Process priority queries first
         priority_requests = inference_requests + simple_vector_requests
         remaining_requests = complex_vector_requests
         
-        # Process priority queries
         if priority_requests:
             # Prepare inference tasks
             inference_tasks = []
             for req in inference_requests:
+                # Configure LLM service if custom model is specified
+                if req.prompt.llm_model:
+                    logger.info(f"📝 BATCH QUERY - Model: {req.prompt.llm_model}, Provider: {req.prompt.llm_provider or 'Auto-detected'}")
+                    
+                    # Create a copy of the settings to avoid modifying the global settings
+                    req_settings = Settings()
+                    req_settings.llm_model = req.prompt.llm_model
+                    req_settings.llm_provider = settings.llm_provider
+                    req_settings.portkey_api_key = settings.portkey_api_key
+                    req_settings.portkey_enabled = settings.portkey_enabled
+                    req_settings.openai_api_key = settings.openai_api_key
+                    
+                    # Configure LLM service with the request-specific settings
+                    current_llm = configure_llm_service(
+                        llm_service, 
+                        req_settings, 
+                        req.prompt.llm_model, 
+                        req.prompt.llm_provider
+                    )
+                    logger.info(f"✅ Batch query LLM configured - Provider: {req_settings.llm_provider}, Model: {req_settings.llm_model}")
+                else:
+                    current_llm = llm_service
+                
                 task = inference_query(
                     req.prompt.query,
                     req.prompt.rules,
                     req.prompt.type,
-                    llm_service,
+                    current_llm,
                 )
                 inference_tasks.append((req, task))
             
@@ -301,8 +413,6 @@ async def run_batch_queries(
                         idx = request_to_index[id(req)]
                         results[idx] = create_response_from_result(req, result)
                 except Exception as e:
-                    logger.error(f"Error processing simple vector queries: {str(e)}")
-                    # Create fallbacks for failed queries
                     for param in simple_vector_params:
                         req = param["_original_req"]
                         idx = request_to_index[id(req)]
@@ -332,8 +442,6 @@ async def run_batch_queries(
                     idx = request_to_index[id(req)]
                     results[idx] = create_response_from_result(req, result)
             except Exception as e:
-                logger.error(f"Error processing complex queries: {str(e)}")
-                # Create fallbacks for failed queries
                 for param in complex_params:
                     req = param["_original_req"]
                     idx = request_to_index[id(req)]
@@ -351,8 +459,12 @@ async def run_batch_queries(
         
     except Exception as e:
         logger.error(f"Error processing batch queries: {str(e)}")
-        # Create fallback responses for all requests
         return [create_fallback_response(req) for req in requests]
+    finally:
+        # Restore original settings
+        settings.llm_provider = original_provider
+        settings.llm_model = original_model
+
 
 def create_response_from_result(req: QueryRequestSchema, result: Any) -> QueryAnswerResponse:
     """Create a QueryAnswerResponse from a query result."""
@@ -383,6 +495,7 @@ def create_response_from_result(req: QueryRequestSchema, result: Any) -> QueryAn
         resolved_entities=result.resolved_entities or [],
     )
 
+
 def create_fallback_response(req: QueryRequestSchema) -> QueryAnswerResponse:
     """Create a fallback response for a failed query."""
     # Create a type-appropriate fallback
@@ -410,6 +523,7 @@ def create_fallback_response(req: QueryRequestSchema) -> QueryAnswerResponse:
         chunks=[],
         resolved_entities=[],
     )
+
 
 @router.get("/test-error", response_model=Dict[str, Any])
 async def test_error(error_type: str = "timeout") -> Dict[str, Any]:
@@ -450,4 +564,3 @@ async def test_error(error_type: str = "timeout") -> Dict[str, Any]:
         )
     else:
         return {"message": f"Unknown error type: {error_type}"}
-    

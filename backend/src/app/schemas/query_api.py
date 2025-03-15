@@ -24,6 +24,10 @@ class QueryPromptSchema(BaseModel):
     query: str
     type: FormatType
     rules: list[Rule] = []
+    llm_model: Optional[str] = None     # gpt-4o, claude-3-5-sonnet, gemini-1.5-pro, etc.
+    llm_provider: Optional[str] = None
+    llm_virtual_key: Optional[str] = None
+    debug_id: Optional[str] = None  # Optional debug ID for tracking requests
 
 
 class QueryRequestSchema(BaseModel):

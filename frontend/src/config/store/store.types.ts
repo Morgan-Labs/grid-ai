@@ -123,6 +123,7 @@ export interface AnswerTableColumn {
   query: string;
   rules: AnswerTableRule[];
   resolvedEntities?: ResolvedEntity[];
+  llmModel?: string;     // gpt-4o, claude-3-5-sonnet, gemini-1.5-pro, etc.
 }
 
 export interface AnswerTableRow {

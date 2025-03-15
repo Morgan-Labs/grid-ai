@@ -269,23 +269,33 @@ export const runQuery = async (row: any, column: any, globalRules: any = []): Pr
   // Combine column rules with global rules
   const rules = [...(column?.rules || []), ...(globalRules || [])];
   
-  console.log('Running query to:', API_ENDPOINTS.QUERY);
+  // Create request body - we only need to send the model name
+  // The backend will automatically detect the provider based on model name
+  const requestBody = {
+    document_id: documentId,
+    prompt: {
+      id: promptId,
+      entity_type: column?.entityType || "",
+      query: column?.query || "",
+      type: column?.type || "str",
+      rules: rules,
+      llm_model: column?.llmModel
+    }
+  };
+  
+  // Log the model being used for debugging
+  console.log('🔍 QUERY REQUEST:', {
+    model: column?.llmModel || 'Default',
+    type: column?.type || 'str',
+    query: column?.query?.substring(0, 50) + (column?.query?.length > 50 ? '...' : '') || ''
+  });
   
   try {
     const response = await fetch(API_ENDPOINTS.QUERY, {
       method: 'POST',
       headers: getAuthHeaders(),
       credentials: 'include',
-      body: JSON.stringify({
-        document_id: documentId,
-        prompt: {
-          id: promptId,
-          entity_type: column?.entityType || "",
-          query: column?.query || "",
-          type: column?.type || "str",
-          rules: rules
-        }
-      }),
+      body: JSON.stringify(requestBody),
     });
     
     if (!response.ok) {
@@ -488,6 +498,15 @@ export const runBatchQueries = async (
       complexity = 1;
     }
     
+    // Log the model being used for debugging
+    if (column?.llmModel) {
+      console.log('🔍 BATCH QUERY MODEL:', {
+        model: column?.llmModel,
+        type: column?.type || 'str',
+        query: column?.query?.substring(0, 30) + (column?.query?.length > 30 ? '...' : '') || ''
+      });
+    }
+    
     return {
       document_id: documentId,
       prompt: {
@@ -495,7 +514,9 @@ export const runBatchQueries = async (
         entity_type: column?.entityType || "",
         query: column?.query || "",
         type: column?.type || "str",
-        rules: rules
+        rules: rules,
+        // Include only the model name - the backend will determine the provider
+        llm_model: column?.llmModel
       },
       // Store original query info for callbacks with guaranteed unique index
       _originalQuery: { 

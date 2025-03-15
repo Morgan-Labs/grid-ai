@@ -285,6 +285,7 @@ async def process_queries_in_parallel(
         - document_id: str
         - rules: List[Rule]
         - format: FormatType
+        - _original_req: Optional[QueryRequestSchema] - Original request with model info
     llm_service : CompletionService
         The language model service.
     vector_db_service : Any
@@ -305,19 +306,79 @@ async def process_queries_in_parallel(
     original_indices = [idx for idx, _ in prioritized_queries]
     sorted_queries = [q for _, q in prioritized_queries]
     
-    # Create tasks with retry logic
-    tasks = [
-        process_query_with_retry(
+    # Create tasks with retry logic and custom LLM services if needed
+    tasks = []
+    for q in sorted_queries:
+        # Check if this query has a custom model specified
+        custom_llm = llm_service
+        if "_original_req" in q and hasattr(q["_original_req"], "prompt") and hasattr(q["_original_req"].prompt, "llm_model") and q["_original_req"].prompt.llm_model:
+            # Create a copy of the settings to avoid modifying the global settings
+            from app.core.config import Settings
+            from app.core.dependencies import get_settings
+            from app.services.llm.factory import CompletionServiceFactory
+            
+            # Get current settings
+            settings = get_settings()
+            
+            # Create a new settings object for this query
+            req_settings = Settings()
+            req_settings.llm_model = q["_original_req"].prompt.llm_model
+            req_settings.llm_provider = settings.llm_provider
+            req_settings.portkey_api_key = settings.portkey_api_key
+            req_settings.portkey_enabled = settings.portkey_enabled
+            req_settings.openai_api_key = settings.openai_api_key
+            
+            # Auto-detect provider from model name
+            provider = None
+            model = q["_original_req"].prompt.llm_model.lower()
+            if "claude" in model:
+                provider = "anthropic"
+            elif "gemini" in model:
+                provider = "gemini"
+            elif "gpt" in model:
+                provider = "openai"
+            
+            # Configure LLM service
+            # Provider keys for all providers
+            provider_keys = {
+                "anthropic": "anthropic-a27fda",
+                "gemini": "gemini-3161fc", 
+                "openai": "openai-6a3e17"
+            }
+            
+            # Get virtual key for the provider
+            virtual_key = provider_keys.get(provider)
+            
+            if provider != "openai":
+                # For non-OpenAI providers, always use Portkey
+                req_settings.llm_provider = "portkey"
+                custom_llm = CompletionServiceFactory.create_service(req_settings)
+            else:
+                # For OpenAI, we can use Portkey too
+                req_settings.llm_provider = "portkey"
+                custom_llm = CompletionServiceFactory.create_service(req_settings)
+            
+            # Configure virtual key and model for all providers
+            if hasattr(custom_llm, 'update_virtual_key') and virtual_key:
+                try:
+                    logger.info(f"Setting virtual key for {provider}: {virtual_key} with model: {model}")
+                    custom_llm.update_virtual_key(virtual_key, provider, model)
+                except Exception as e:
+                    logger.error(f"Error setting virtual key: {str(e)}")
+            
+            logger.info(f"Using custom LLM model for query: {req_settings.llm_model}")
+        
+        # Create task with the appropriate LLM service
+        task = process_query_with_retry(
             q["query_type"],
             q["query"],
             q["document_id"],
             q["rules"],
             q["format"],
-            llm_service,
+            custom_llm,
             vector_db_service,
         )
-        for q in sorted_queries
-    ]
+        tasks.append(task)
     
     # Use a larger batch size for the first batch to get initial results faster
     first_batch_size = min(len(tasks), MAX_CONCURRENT_QUERIES * 2)

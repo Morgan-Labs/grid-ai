@@ -6,6 +6,7 @@ from typing import Optional
 from app.core.config import Settings
 from app.services.llm.base import CompletionService
 from app.services.llm.openai_llm_service import OpenAICompletionService
+from app.services.llm.portkey_llm_service import PortkeyLLMService
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,12 @@ class CompletionServiceFactory:
         logger.info(
             f"Creating completion service for provider: {settings.llm_provider}"
         )
-        if settings.llm_provider == "openai":
+        
+        if settings.llm_provider == "portkey":
+            logger.info(f"Using Portkey LLM service with model: {settings.llm_model}")
+            return PortkeyLLMService(settings)
+        elif settings.llm_provider == "openai":
+            logger.info(f"Using OpenAI LLM service with model: {settings.llm_model}")
             return OpenAICompletionService(settings)
-        # Add more providers here when needed
+        
         return None

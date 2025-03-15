@@ -21,11 +21,15 @@ import {
   IconEyeOff,
   IconPlus,
   IconRefresh,
-  IconTrash
+  IconTrash,
+  IconRobot,
+  IconBrandOpenai,
+  IconBrain,
+  IconBrandGoogle
 } from "@tabler/icons-react";
 import { cloneDeep, isEmpty, isEqual, isString } from "lodash-es";
 import { KtColumnQuestion } from "./kt-column-question";
-import { generateOptions, typeOptions } from "./kt-column-settings.utils";
+import { generateOptions, typeOptions, llmOptions } from "./kt-column-settings.utils";
 import {
   AnswerTableColumn,
   AnswerTableRule,
@@ -105,7 +109,6 @@ export function KtColumnSettings({
   const handleClipboardEvent = (e: React.ClipboardEvent) => {
     // Only prevent the event from bubbling up to parent components
     e.stopPropagation();
-    // Don't prevent default behavior to allow paste to work
   };
 
   const rulesMenu = (
@@ -284,6 +287,110 @@ export function KtColumnSettings({
       />
       {state.generate && (
         <>
+          <MenuButton
+            mt="xs"
+            label="LLM Model"
+            rightSection={
+              <Group c="dimmed">
+                {state.llmModel && state.llmModel.includes("claude") && <IconBrain size={16} />}
+                {state.llmModel && state.llmModel.includes("gemini") && <IconBrandGoogle size={16} />}
+                {state.llmModel && (state.llmModel.includes("gpt") || !state.llmModel.includes("claude|gemini")) && <IconBrandOpenai size={16} />}
+                {!state.llmModel && <IconRobot size={16} />}
+                <Text>
+                  {state.llmModel || "Default"}
+                </Text>
+              </Group>
+            }
+            menu={
+              <Box w={300} p="xs">
+                {/* OpenAI Models */}
+                <Box mb="md">
+                  <Group mb="xs">
+                    <IconBrandOpenai size={18} />
+                    <Text fw={500}>OpenAI</Text>
+                  </Group>
+                  <Group gap="xs">
+                    {llmOptions
+                      .filter(model => model.provider === "openai")
+                      .map(model => (
+                        <Button
+                          key={model.model}
+                          size="xs"
+                          variant={state.llmModel === model.model ? "filled" : "light"}
+                          onClick={() => handleSet({
+                            llmModel: model.model
+                          })}
+                        >
+                          {model.label}
+                        </Button>
+                      ))
+                    }
+                  </Group>
+                </Box>
+                
+                {/* Anthropic Models */}
+                <Box mb="md">
+                  <Group mb="xs">
+                    <IconBrain size={18} />
+                    <Text fw={500}>Anthropic</Text>
+                  </Group>
+                  <Group gap="xs">
+                    {llmOptions
+                      .filter(model => model.provider === "anthropic")
+                      .map(model => (
+                        <Button
+                          key={model.model}
+                          size="xs"
+                          variant={state.llmModel === model.model ? "filled" : "light"}
+                          onClick={() => handleSet({
+                            llmModel: model.model
+                          })}
+                        >
+                          {model.label}
+                        </Button>
+                      ))
+                    }
+                  </Group>
+                </Box>
+                
+                {/* Google Models */}
+                <Box mb="md">
+                  <Group mb="xs">
+                    <IconBrandGoogle size={18} />
+                    <Text fw={500}>Google</Text>
+                  </Group>
+                  <Group gap="xs">
+                    {llmOptions
+                      .filter(model => model.provider === "gemini")
+                      .map(model => (
+                        <Button
+                          key={model.model}
+                          size="xs"
+                          variant={state.llmModel === model.model ? "filled" : "light"}
+                          onClick={() => handleSet({
+                            llmModel: model.model
+                          })}
+                        >
+                          {model.label}
+                        </Button>
+                      ))
+                    }
+                  </Group>
+                </Box>
+                
+                <Divider my="xs" />
+                <Button
+                  fullWidth
+                  variant="light"
+                  onClick={() => handleSet({
+                    llmModel: undefined
+                  })}
+                >
+                  Use Default Model
+                </Button>
+              </Box>
+            }
+          />
           <MenuButton
             mt="xs"
             label="Rules"
