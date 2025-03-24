@@ -1,7 +1,19 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { ActionIcon, Divider, Group, MantineProvider } from "@mantine/core";
+import { 
+  ActionIcon, 
+  Divider, 
+  Group, 
+  MantineProvider, 
+  Paper, 
+  Text, 
+  Tooltip 
+} from "@mantine/core";
 import { ModalsProvider } from "@mantine/modals";
-import { IconMoon, IconSun } from "@tabler/icons-react";
+import { 
+  IconDatabase, 
+  IconMoon, 
+  IconSun
+} from "@tabler/icons-react";
 import "@mantine/core/styles.css";
 import "@mantine/dropzone/styles.css";
 import "@silevis/reactgrid/styles.css";
@@ -22,37 +34,49 @@ export function App() {
       <MantineProvider theme={theme} forceColorScheme={colorScheme}>
         <ModalsProvider>
           <AuthWrapper>
-            <Group p="md" justify="space-between">
-              <Group>
-                <KtSwitch />
-                {/* Test Errors button commented out
-                <Button 
-                  variant="subtle" 
-                  leftSection={<IconBug size={16} />}
-                  onClick={() => setErrorTestOpen(true)}
-                >
-                  Test Errors
-                </Button>
-                */}
-              </Group>
-              <ActionIcon onClick={useStore.getState().toggleColorScheme}>
-                {colorScheme === "light" ? <IconSun /> : <IconMoon />}
-              </ActionIcon>
-            </Group>
-            
-            {/* Error Test Modal - commented out
-            <Modal
-              opened={errorTestOpen}
-              onClose={() => setErrorTestOpen(false)}
-              title="Error Testing"
-              size="lg"
+            {/* Main Header */}
+            <Paper 
+              shadow="xs" 
+              p="md" 
+              className="app-header"
+              style={{
+                position: 'sticky',
+                top: 0,
+                zIndex: 100,
+                borderRadius: 0,
+                backgroundColor: colorScheme === 'dark' ? 
+                  'var(--mantine-color-dark-7)' : 
+                  'var(--mantine-color-gray-0)'
+              }}
             >
-              <ErrorTest />
-            </Modal>
-            */}
-            <Divider />
-            <KtControls mt="md" ml="md" />
-            <KtTable mt="md" />
+              <Group justify="space-between" align="center">
+                {/* Logo and Table Selector */}
+                <Group>
+                  <Group gap="xs" style={{ alignItems: "center" }}>
+                    <IconDatabase size={24} style={{ color: 'var(--mantine-color-blue-6)' }} />
+                    <Text fw={700} size="lg">AI Grid</Text>
+                  </Group>
+                  <Divider orientation="vertical" />
+                  <KtSwitch />
+                </Group>
+                
+                {/* Right side controls */}
+                <Tooltip label={`Switch to ${colorScheme === 'light' ? 'dark' : 'light'} mode`}>
+                  <ActionIcon 
+                    variant="subtle" 
+                    onClick={useStore.getState().toggleColorScheme}
+                    size="md"
+                  >
+                    {colorScheme === "light" ? <IconMoon size={18} /> : <IconSun size={18} />}
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+            </Paper>
+            
+            {/* Controls and Table */}
+            <KtControls className="excel-controls" />
+            <KtTable />
+            
             <KTFileDrop />
             <KtAutoPersistence />
           </AuthWrapper>

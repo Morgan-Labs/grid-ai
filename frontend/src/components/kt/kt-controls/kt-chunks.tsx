@@ -1,9 +1,12 @@
 import { useMemo } from "react";
-import { Blockquote, Modal, Stack, Text } from "@mantine/core";
+import { Blockquote, Modal, Stack, Text, Button, Group, Paper } from "@mantine/core";
 import { isEmpty, pick, values, isString, isArray } from "lodash-es";
+import { IconChartBar } from "@tabler/icons-react";
 import { useStore } from "@config/store";
+import { useDisclosure } from "@mantine/hooks";
 
 export function KtChunks() {
+  const [opened, { open, close }] = useDisclosure(false);
   const table = useStore(store => store.getTable());
   const allChunks = table.chunks;
   const openedChunks = table.openedChunks;
@@ -61,24 +64,49 @@ export function KtChunks() {
     return result;
   };
 
+  const handleOpenChunks = () => {
+    open();
+  };
+
+  const handleCloseChunks = () => {
+    close();
+    useStore.getState().closeChunks();
+  };
+
   return (
-    <Modal
-      size="xl"
-      title="Chunks"
-      opened={!isEmpty(openedChunks)}
-      onClose={() => useStore.getState().closeChunks()}
-    >
-      {isEmpty(chunks) ? (
-        <Text>No chunks found for selected cells</Text>
-      ) : (
-        <Stack>
-          {chunks.map((chunk, index) => (
-            <Blockquote key={index}>
-              <div dangerouslySetInnerHTML={{ __html: highlightAnswers(chunk.text || chunk.content) }} />
-            </Blockquote>
-          ))}
-        </Stack>
+    <Group gap={8}>
+      <Button 
+        variant="light"
+        leftSection={<IconChartBar size={16} />}
+        onClick={handleOpenChunks}
+      >
+        View Chunks
+      </Button>
+      
+      {!isEmpty(openedChunks) && (
+        <Paper withBorder py={4} px="xs">
+          <Text>{openedChunks.length} selected</Text>
+        </Paper>
       )}
-    </Modal>
+      
+      <Modal
+        size="xl"
+        title="Document Chunks"
+        opened={opened || !isEmpty(openedChunks)}
+        onClose={handleCloseChunks}
+      >
+        {isEmpty(chunks) ? (
+          <Text>No chunks found for selected cells. Select cells in the table to view their source chunks.</Text>
+        ) : (
+          <Stack>
+            {chunks.map((chunk, index) => (
+              <Blockquote key={index}>
+                <div dangerouslySetInnerHTML={{ __html: highlightAnswers(chunk.text || chunk.content) }} />
+              </Blockquote>
+            ))}
+          </Stack>
+        )}
+      </Modal>
+    </Group>
   );
 }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, Group, FileButton, Tooltip, Modal, Text } from "@mantine/core";
-import { IconTable } from "@tabler/icons-react";
+import { IconUpload } from "@tabler/icons-react";
 import { useStore } from "@config/store";
 import { getBlankColumn, getBlankRow } from "@config/store/store.utils";
 import { AnswerTableRow } from "@config/store/store.types";
@@ -136,8 +136,8 @@ export function KtCsvUpload() {
               // console.log("Current table state:", store.getTable());
               
               notifications.show({
-                title: 'CSV imported',
-                message: `Successfully imported data from ${selectedFile.name}`,
+                title: 'CSV uploaded',
+                message: `Successfully uploaded data from ${selectedFile.name}`,
                 color: 'green'
               });
             } catch (saveError) {
@@ -165,7 +165,7 @@ export function KtCsvUpload() {
         } catch (error) {
           console.error('Error processing CSV file:', error);
           notifications.show({
-            title: 'Import failed',
+            title: 'Upload failed',
             message: error instanceof Error ? error.message : 'Unknown error',
             color: 'red'
           });
@@ -286,7 +286,7 @@ export function KtCsvUpload() {
       <Modal 
         opened={confirmModalOpen} 
         onClose={() => setConfirmModalOpen(false)}
-        title="Confirm CSV Import"
+        title="Confirm CSV Upload"
         centered
       >
         <Text mb="md">
@@ -309,22 +309,21 @@ export function KtCsvUpload() {
             Cancel
           </Button>
           <Button color="blue" onClick={handleCsvUpload} loading={loading}>
-            Import CSV
+            Upload CSV
           </Button>
         </Group>
       </Modal>
       
-      <Tooltip label="Import CSV data">
+      <Tooltip label="Upload CSV data">
         <Group>
           <FileButton onChange={handleFileSelect} accept=".csv">
             {(props) => (
               <Button
                 {...props}
-                variant="outline"
-                leftSection={<IconTable size={16} />}
-                color="blue"
+                variant="default"
+                leftSection={<IconUpload size={16} />}
               >
-                Import CSV
+                Upload CSV
               </Button>
             )}
           </FileButton>

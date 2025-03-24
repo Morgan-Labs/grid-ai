@@ -1,19 +1,18 @@
 import {
   Text,
-  Box,
   BoxProps,
   Button,
   Group,
   Menu,
   TextInput,
   ActionIcon,
-  Tooltip
+  Tooltip,
+  Badge
 } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { useInputState } from "@mantine/hooks";
 import {
   IconChevronDown,
-  IconDatabase,
   IconDeviceFloppy,
   IconPencil,
   IconPlus,
@@ -59,41 +58,55 @@ export function KtSwitch(props: BoxProps) {
 
   return (
     <Group gap="xs" {...props}>
-<Box style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-  <IconDatabase size={20} />
-  <Text fw={700} style={{ marginLeft: 4 }}>AI Grid</Text>
-</Box>
-      <Menu>
-        <Menu.Target>
-          <Button rightSection={<IconChevronDown />}>{table.name}</Button>
-        </Menu.Target>
-        <Menu.Dropdown>
-          {tables.map(t => (
-            <Menu.Item
-              key={t.id}
-              leftSection={<IconTable />}
-              onClick={() => useStore.getState().switchTable(t.id)}
+      <Group gap="xs">
+        <Menu position="bottom-start" shadow="md">
+          <Menu.Target>
+            <Button 
+              variant="light" 
+              rightSection={<IconChevronDown size={16} />}
+              leftSection={<IconTable size={16} />}
             >
-              {t.name}
+              {table.name}
+            </Button>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Label>Tables</Menu.Label>
+            {tables.map(t => (
+              <Menu.Item
+                key={t.id}
+                leftSection={<IconTable size={16} />}
+                onClick={() => useStore.getState().switchTable(t.id)}
+                rightSection={t.id === table.id && <Badge size="xs" variant="light">Active</Badge>}
+              >
+                {t.name}
+              </Menu.Item>
+            ))}
+            <Menu.Divider />
+            <Menu.Item 
+              leftSection={<IconPlus size={16} />} 
+              onClick={handleNewTable}
+              color="blue"
+            >
+              New table
             </Menu.Item>
-          ))}
-          <Menu.Item leftSection={<IconPlus />} onClick={handleNewTable}>
-            New table
-          </Menu.Item>
-        </Menu.Dropdown>
-      </Menu>
-      <Tooltip label="Rename table">
-        <ActionIcon onClick={handleRename}>
-          <IconPencil />
-        </ActionIcon>
-      </Tooltip>
-      {tables.length > 1 && (
-        <Tooltip label="Delete table">
-          <ActionIcon color="red" onClick={handleDelete}>
-            <IconTrash />
-          </ActionIcon>
-        </Tooltip>
-      )}
+          </Menu.Dropdown>
+        </Menu>
+        
+        <Group gap={4}>
+          <Tooltip label="Rename table">
+            <ActionIcon variant="subtle" onClick={handleRename} size="md">
+              <IconPencil size={16} />
+            </ActionIcon>
+          </Tooltip>
+          {tables.length > 1 && (
+            <Tooltip label="Delete table">
+              <ActionIcon variant="subtle" color="red" onClick={handleDelete} size="md">
+                <IconTrash size={16} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+        </Group>
+      </Group>
     </Group>
   );
 }

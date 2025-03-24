@@ -6,7 +6,6 @@ import { KtFilters } from "./kt-filters";
 import { KTGlobalRules } from "./kt-global-rules";
 import { KtResolvedEntities } from "./kt-resolved-entities";
 import { KtDownload } from "./kt-download";
-import { KtChunks } from "./kt-chunks";
 import { KtCsvUpload } from "../kt-csv-upload";
 import { useStore } from "@config/store";
 
@@ -14,7 +13,10 @@ export function KtControls(props: BoxProps) {
   const uploadingFiles = useStore(store => store.getTable().uploadingFiles);
 
   return (
-    <Group gap="xs" {...props}>
+    <Group className="excel-ribbon" p="xs" {...props}>
+      <KtCsvUpload />
+      <KtDownload.Csv />
+      <KtClear />
       <Button
         leftSection={<IconEyeOff />}
         onClick={() => useStore.getState().toggleAllColumns(true)}
@@ -22,13 +24,10 @@ export function KtControls(props: BoxProps) {
         Hide all columns
       </Button>
       <KtHiddenPill />
-      <KtClear />
       <KtFilters />
       <KTGlobalRules />
       <KtResolvedEntities />
-      <KtDownload.Csv />
-      <KtCsvUpload />
-      <KtChunks />
+      
       {uploadingFiles && (
         <Group>
           <Loader size="xs" />

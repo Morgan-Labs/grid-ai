@@ -21,3 +21,93 @@
 .tabler-icon {
   stroke-width: 1.5;
 }
+
+/* App Header Styles */
+.app-header {
+  border-bottom: 1px solid;
+  border-color: var(--mantine-color-gray-3);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+  padding: 8px 16px !important; /* Reduced padding */
+}
+
+[data-mantine-color-scheme="dark"] .app-header {
+  border-color: var(--mantine-color-dark-4);
+}
+
+.app-header .mantine-Text-root {
+  font-size: 16px; /* Slightly smaller text */
+}
+
+.app-header .mantine-Group-root {
+  gap: 10px; /* Reduced gap */
+}
+
+/* Excel-like Ribbon */
+.excel-ribbon {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--mantine-color-gray-3);
+  background: linear-gradient(to bottom, 
+    var(--mantine-color-gray-0) 0%, 
+    var(--mantine-color-gray-1) 100%);
+  flex-wrap: wrap;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+[data-mantine-color-scheme="dark"] .excel-ribbon {
+  border-color: var(--mantine-color-dark-4);
+  background: linear-gradient(to bottom, 
+    var(--mantine-color-dark-6) 0%, 
+    var(--mantine-color-dark-7) 100%);
+}
+
+.excel-ribbon .mantine-Button-root {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 4px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  border: 1px solid var(--mantine-color-gray-3);
+}
+
+[data-mantine-color-scheme="dark"] .excel-ribbon .mantine-Button-root {
+  border-color: var(--mantine-color-dark-4);
+}
+
+.excel-ribbon .mantine-Button-root:hover {
+  background-color: var(--mantine-color-gray-2);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+[data-mantine-color-scheme="dark"] .excel-ribbon .mantine-Button-root:hover {
+  background-color: var(--mantine-color-dark-5);
+}
+
+.excel-ribbon .mantine-Group-root {
+  gap: 8px;
+}
+
+/* Improve the icons in buttons */
+.excel-ribbon .mantine-Button-section svg {
+  stroke-width: 1.5;
+}
+
+/* Add a subtle separator between button groups */
+.excel-ribbon > .mantine-Group-root > *:not(:last-child) {
+  margin-right: 4px;
+  position: relative;
+}
+
+.excel-ribbon > .mantine-Group-root > *:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  right: -6px;
+  top: 20%;
+  height: 60%;
+  width: 1px;
+  background-color: var(--mantine-color-gray-3);
+}
+
+[data-mantine-color-scheme="dark"] .excel-ribbon > .mantine-Group-root > *:not(:last-child)::after {
+  background-color: var(--mantine-color-dark-4);
+}
