@@ -44,11 +44,12 @@ export const llmOptions: LLMOption[] = [
   { provider: "openai", model: "gpt-4-turbo", label: "GPT-4 Turbo" },
   
   // Anthropic models
+  { provider: "anthropic", model: "claude-3-7-sonnet-20250219", label: "Claude 3.7 Sonnet" },
   { provider: "anthropic", model: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet" },
   { provider: "anthropic", model: "claude-3-opus-20240229", label: "Claude 3 Opus" },
-  { provider: "anthropic", model: "claude-3-7-sonnet-20250219", label: "Claude 3.7 Sonnet" },
   
   // Google models
-  { provider: "gemini", model: "gemini-1.5-pro", label: "Gemini 1.5 Pro" },
+  { provider: "gemini", model: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+  { provider: "gemini", model: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite" },
   { provider: "gemini", model: "gemini-1.5-flash", label: "Gemini 1.5 Flash" }
 ];

@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o"  # Model name depends on the provider
     llm_virtual_key: Optional[str] = None  # Portkey virtual key for the selected provider/model
     openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None  # API key for Anthropic models
     
     # PORTKEY CONFIG
     portkey_api_key: Optional[str] = None
@@ -149,6 +150,12 @@ def get_settings() -> Settings:
         logger.info("OpenAI API key is set")
     else:
         logger.warning("OpenAI API key is not set")
+    
+    # Check if Anthropic API key is loaded
+    if settings.anthropic_api_key:
+        logger.info("Anthropic API key is set")
+    else:
+        logger.warning("Anthropic API key is not set")
     
     # Check if Portkey is configured
     if settings.portkey_api_key:
