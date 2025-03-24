@@ -111,3 +111,81 @@
 [data-mantine-color-scheme="dark"] .excel-ribbon > .mantine-Group-root > *:not(:last-child)::after {
   background-color: var(--mantine-color-dark-4);
 }
+
+/* Column add button styles */
+.column-add-button {
+  z-index: 20;
+  pointer-events: auto;
+}
+
+.column-add-button.left {
+  left: -12px;
+}
+
+.column-add-button.right {
+  right: -12px;
+}
+
+/* Make sure the column add buttons don't interfere with drag-and-drop */
+.column-add-button .mantine-ActionIcon-root {
+  pointer-events: auto;
+}
+
+/* Ensure the buttons are visible in dark mode */
+[data-mantine-color-scheme="dark"] .column-add-button .mantine-ActionIcon-root {
+  border-color: var(--mantine-color-dark-4);
+}
+
+/* Enhanced column add button styles */
+.column-add-button .mantine-ActionIcon-root {
+  background-color: var(--mantine-color-blue-6);
+}
+
+[data-mantine-color-scheme="dark"] .column-add-button .mantine-ActionIcon-root {
+  background-color: var(--mantine-color-blue-7);
+}
+
+/* Indicator line styles */
+.column-add-button .indicator-line {
+  background: linear-gradient(
+    to bottom, 
+    transparent, 
+    var(--mantine-color-blue-5), 
+    transparent
+  );
+}
+
+[data-mantine-color-scheme="dark"] .column-add-button .indicator-line {
+  background: linear-gradient(
+    to bottom, 
+    transparent, 
+    var(--mantine-color-blue-4), 
+    transparent
+  );
+}
+
+/* Drag and drop styles */
+.dragging {
+  opacity: 0.7;
+  background-color: var(--mantine-color-blue-0);
+}
+
+.drop-target {
+  background-color: var(--mantine-color-blue-0);
+}
+
+.drop-left {
+  box-shadow: inset 3px 0 0 var(--mantine-color-blue-6);
+}
+
+.drop-right {
+  box-shadow: inset -3px 0 0 var(--mantine-color-blue-6);
+}
+
+[data-mantine-color-scheme="dark"] .dragging {
+  background-color: var(--mantine-color-dark-5);
+}
+
+[data-mantine-color-scheme="dark"] .drop-target {
+  background-color: var(--mantine-color-dark-5);
+}
