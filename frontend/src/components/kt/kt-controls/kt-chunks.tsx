@@ -1,7 +1,6 @@
-import { useMemo } from "react";
-import { Blockquote, Modal, Stack, Text, Button, Group, Paper } from "@mantine/core";
+import { useMemo, useEffect } from "react";
+import { Blockquote, Modal, Stack, Text } from "@mantine/core";
 import { isEmpty, pick, values, isString, isArray } from "lodash-es";
-import { IconChartBar } from "@tabler/icons-react";
 import { useStore } from "@config/store";
 import { useDisclosure } from "@mantine/hooks";
 
@@ -64,9 +63,16 @@ export function KtChunks() {
     return result;
   };
 
-  const handleOpenChunks = () => {
-    open();
-  };
+  // Only open the modal when chunks are selected via right-click
+  useEffect(() => {
+    // Only open the modal if there are chunks to show
+    if (!isEmpty(openedChunks)) {
+      open();
+    } else {
+      // Close the modal if there are no chunks to show
+      close();
+    }
+  }, [openedChunks, open, close]);
 
   const handleCloseChunks = () => {
     close();
@@ -74,27 +80,12 @@ export function KtChunks() {
   };
 
   return (
-    <Group gap={8}>
-      <Button 
-        variant="light"
-        leftSection={<IconChartBar size={16} />}
-        onClick={handleOpenChunks}
-      >
-        View Chunks
-      </Button>
-      
-      {!isEmpty(openedChunks) && (
-        <Paper withBorder py={4} px="xs">
-          <Text>{openedChunks.length} selected</Text>
-        </Paper>
-      )}
-      
-      <Modal
-        size="xl"
-        title="Document Chunks"
-        opened={opened || !isEmpty(openedChunks)}
-        onClose={handleCloseChunks}
-      >
+    <Modal
+      size="xl"
+      title="Document Chunks"
+      opened={opened || !isEmpty(openedChunks)}
+      onClose={handleCloseChunks}
+    >
         {isEmpty(chunks) ? (
           <Text>No chunks found for selected cells. Select cells in the table to view their source chunks.</Text>
         ) : (
@@ -106,7 +97,6 @@ export function KtChunks() {
             ))}
           </Stack>
         )}
-      </Modal>
-    </Group>
+    </Modal>
   );
 }

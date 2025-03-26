@@ -49,6 +49,7 @@ export const llmOptions: LLMOption[] = [
   { provider: "anthropic", model: "claude-3-opus-20240229", label: "Claude 3 Opus" },
   
   // Google models
+  { provider: "gemini", model: "gemini-2.5-pro-exp-03-25", label: "Gemini 2.5 Pro Exp" },
   { provider: "gemini", model: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
   { provider: "gemini", model: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite" },
   { provider: "gemini", model: "gemini-1.5-flash", label: "Gemini 1.5 Flash" }
