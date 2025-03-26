@@ -1,5 +1,5 @@
 import { Cell, CellTemplate, Compatible, Uncertain } from "@silevis/reactgrid";
-import { Group, Text, ColorSwatch, ActionIcon } from "@mantine/core";
+import { Group, Text, ColorSwatch, ActionIcon, Tooltip } from "@mantine/core";
 import { IconSettings } from "@tabler/icons-react";
 import { KtColumnSettings } from "./kt-column-settings";
 import { KtColumnAddButton } from "./kt-column-add-button";
@@ -186,11 +186,58 @@ export class KtColumnCellTemplate implements CellTemplate<KtColumnCell> {
               onDrop={handleDrop}
               style={{ cursor: columnIndex !== undefined ? 'grab' : 'default' }}
             >
-              <ColorSwatch
-                size={12}
-                color={entityColor(column.entityType).fill}
-              />
-              <Text fw={500} style={{ marginRight: '4px' }}>{column.entityType}</Text>
+              <Tooltip label={column.generate ? (column.llmModel ? `LLM: ${column.llmModel}` : "LLM-generated column") : undefined}>
+                <div style={{ 
+                  position: 'relative', 
+                  width: '12px', 
+                  height: '12px',
+                  borderRadius: '4px'
+                }}>
+                  <ColorSwatch
+                    size={12}
+                    color={entityColor(column.entityType).fill}
+                  />
+                  {column.generate && (
+                    <>
+                      <div 
+                        className="pulse-animation"
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          borderRadius: '4px',
+                          animation: 'pulse 3s infinite ease-in-out',
+                          background: 'radial-gradient(circle, rgba(255,255,255,0.6) 0%, rgba(255,255,255,0) 70%)',
+                          pointerEvents: 'none',
+                          mixBlendMode: 'soft-light',
+                          boxShadow: '0 0 2px 1px rgba(255,255,255,0.2)'
+                        }} 
+                      />
+                      <Text
+                        size="7px"
+                        fw={800}
+                        style={{
+                          position: 'absolute',
+                          top: '50%',
+                          left: '50%',
+                          transform: 'translate(-50%, -50%)',
+                          color: 'white',
+                          textShadow: '0px 0px 2px rgba(0,0,0,0.7)',
+                          letterSpacing: '-0.3px',
+                          lineHeight: 1,
+                          userSelect: 'none',
+                          pointerEvents: 'none'
+                        }}
+                      >
+                        AI
+                      </Text>
+                    </>
+                  )}
+                </div>
+              </Tooltip>
+              <Text fw={500}>{column.entityType}</Text>
               <ActionIcon 
                 variant="subtle" 
                 size="xs"

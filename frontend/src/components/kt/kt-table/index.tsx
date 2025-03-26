@@ -75,7 +75,10 @@ export function KtTable(props: BoxProps) {
       {
         rowId: HEADER_ROW_ID,
         cells: [
-          { type: "header", text: "Document" },
+          { 
+            type: "header", 
+            text: "📄 Document"
+          },
           ...visibleColumns.map<KtColumnCell>((column, index) => ({
             type: "kt-column",
             column,
