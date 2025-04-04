@@ -6,7 +6,8 @@ import os
 import tempfile
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+import requests
+from typing import Any, Dict, List, Optional, Tuple
 
 from langchain.schema import Document as LangchainDocument
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -646,6 +647,251 @@ class DocumentService:
             logger.error(f"Error deleting document: {e}")
             raise
 
+    async def fetch_document_text_by_id(self, document_id: str) -> Optional[str]:
+        """Fetch document text from the external API using document ID.
+        
+        Parameters
+        ----------
+        document_id : str
+            The ID of the document to fetch
+            
+        Returns
+        -------
+        Optional[str]
+            The document text if successful, None otherwise
+        """
+        try:
+            logger.info(f"Fetching document text for document_id: {document_id}")
+            
+            # Format the API URL with document ID and token
+            api_url = self.settings.document_api_endpoint.format(
+                document_id, 
+                self.settings.document_api_token
+            )
+            
+            # Set headers
+            headers = {
+                'accept': 'application/json',
+            }
+            
+            # Make the request
+            response = requests.get(api_url, headers=headers)
+            
+            # Check for successful response
+            if response.status_code == 200:
+                # Extract and return the text from the JSON response
+                text_content = response.json().get('text')
+                
+                if text_content:
+                    logger.info(f"Successfully fetched text for document_id: {document_id} ({len(text_content)} characters)")
+                    return text_content
+                else:
+                    logger.warning(f"Document API returned empty text for document_id: {document_id}")
+            else:
+                logger.error(f"Failed to fetch document text, status code: {response.status_code}")
+                
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error fetching document text: {e}", exc_info=True)
+            return None
+
+    async def fetch_document_metadata_by_id(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch document metadata from the external API using document ID.
+
+        Parameters
+        ----------
+        document_id : str
+            The ID of the document to fetch metadata for
+
+        Returns
+        -------
+        Optional[Dict[str, Any]]
+            The document metadata if successful, None otherwise
+        """
+        try:
+            logger.info(f"Fetching document metadata for document_id: {document_id}")
+
+            # Use the dedicated metadata endpoint URL from settings
+            api_url = self.settings.document_metadata_api_endpoint.format(document_id)
+
+            # Set headers, including the API token if required by the external API
+            headers = {
+                'accept': 'application/json',
+                'Authorization': f'Bearer {self.settings.document_api_token}' # Assuming same token works
+            }
+
+            # Make the request
+            response = requests.get(api_url, headers=headers)
+
+            # Check for successful response
+            if response.status_code == 200:
+                metadata = response.json()
+                logger.info(f"Successfully fetched metadata for document_id: {document_id}")
+                return metadata
+            else:
+                logger.error(f"Failed to fetch document metadata, status code: {response.status_code}, response: {response.text}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error fetching document metadata: {e}", exc_info=True)
+            return None
+
+    async def process_document_text(self, document_id: str, text_content: str) -> Optional[str]:
+        """Process document text content and store as chunks in the vector database.
+        
+        Parameters
+        ----------
+        document_id : str
+            The ID to use for the document
+        text_content : str
+            The text content of the document
+            
+        Returns
+        -------
+        Optional[str]
+            The document ID if successful, None otherwise
+        """
+        try:
+            logger.info(f"Processing text content for document_id: {document_id}")
+            
+            # Create a LangchainDocument from the text content
+            langchain_doc = LangchainDocument(
+                page_content=text_content,
+                metadata={
+                    "source": f"external-api-document-{document_id}",
+                    "document_id": document_id,
+                    "page": 1
+                }
+            )
+            
+            # Split the document into chunks
+            chunks = self.splitter.split_documents([langchain_doc])
+            
+            if not chunks:
+                logger.warning(f"No chunks were created from document text: {document_id}")
+                return document_id  # Return the ID even if no chunks were created
+            
+            logger.info(f"Document text split into {len(chunks)} chunks")
+            
+            # Prepare chunks for vector storage
+            parent_run_id = None  # The traceable decorator will handle this
+            prepared_chunks = await self.vector_db_service.prepare_chunks(
+                document_id, chunks, parent_run_id
+            )
+            
+            if not prepared_chunks:
+                logger.warning(f"No prepared chunks for document: {document_id}")
+                return document_id
+            
+            # Add document_id to each prepared chunk
+            for chunk in prepared_chunks:
+                chunk["document_id"] = document_id
+            
+            # Store chunks in vector database
+            result = await self.vector_db_service.upsert_vectors(prepared_chunks, parent_run_id)
+            logger.info(f"Vector upsert result: {result}")
+            
+            return document_id
+            
+        except Exception as e:
+            logger.error(f"Error processing document text: {e}", exc_info=True)
+            return None
+            
+    async def fetch_and_process_document_by_id(self, document_id: str) -> Optional[str]:
+        """Fetch document from external API by ID and process it.
+        
+        This method combines fetching and processing in a single call.
+        
+        Parameters
+        ----------
+        document_id : str
+            The ID of the document to fetch and process
+            
+        Returns
+        -------
+        Optional[str]
+            The document ID if successful, None otherwise
+        """
+        try:
+            # Fetch document text from external API
+            text_content = await self.fetch_document_text_by_id(document_id)
+            
+            if not text_content:
+                logger.error(f"Failed to fetch text for document_id: {document_id}")
+                return None
+                
+            # Process the text content
+            return await self.process_document_text(document_id, text_content)
+            
+        except Exception as e:
+            logger.error(f"Error in fetch and process flow: {e}", exc_info=True)
+            return None
+    
+    async def batch_process_documents_by_ids(self, document_ids: List[str], 
+                                           max_concurrent: int = 5) -> List[Dict[str, Any]]:
+        """Process multiple documents by IDs in parallel with controlled concurrency.
+        
+        Parameters
+        ----------
+        document_ids : List[str]
+            List of document IDs to process
+        max_concurrent : int
+            Maximum number of concurrent requests
+            
+        Returns
+        -------
+        List[Dict[str, Any]]
+            List of results with status for each document ID
+        """
+        results = []
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
+        async def process_one_id(doc_id: str) -> Dict[str, Any]:
+            """Process a single document ID with semaphore control."""
+            async with semaphore:
+                try:
+                    processed_id = await self.fetch_and_process_document_by_id(doc_id)
+                    
+                    if processed_id:
+                        return {
+                            "input_id": doc_id,
+                            "status": "success",
+                            "processed_id": processed_id
+                        }
+                    else:
+                        return {
+                            "input_id": doc_id,
+                            "status": "error",
+                            "message": "Failed to process document"
+                        }
+                except Exception as e:
+                    logger.error(f"Error processing document ID {doc_id}: {str(e)}")
+                    return {
+                        "input_id": doc_id,
+                        "status": "error",
+                        "message": str(e)
+                    }
+        
+        # Create tasks for all document IDs
+        tasks = [process_one_id(doc_id) for doc_id in document_ids]
+        
+        # Process all document IDs with controlled concurrency
+        results = await asyncio.gather(*tasks)
+        
+        # Generate summary counts
+        successful = sum(1 for r in results if r["status"] == "success")
+        failed = len(results) - successful
+        
+        return {
+            "results": results,
+            "summary": {
+                "total_requested": len(document_ids),
+                "successful": successful,
+                "failed": failed
+            }
+        }
+    
     async def get_document_chunks(self, document_id: str, parent_run_id: str = None) -> List[Dict[str, Any]]:
         """Retrieve all chunks for a document from the vector database.
         

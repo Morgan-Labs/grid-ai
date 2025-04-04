@@ -3,9 +3,9 @@
 import asyncio
 import logging
 import time
-from typing import List
+from typing import List, Dict, Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, Request, Response
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, Request, Response, Body
 
 from app.core.dependencies import get_document_service
 from app.models.document import Document
@@ -14,6 +14,9 @@ from app.schemas.document_api import (
     DocumentResponseSchema,
     BatchUploadResponseSchema,
     DocumentPreviewResponseSchema,
+    DocumentByIdSchema,
+    BatchFetchByIdsSchema,
+    BatchFetchResponseSchema,
 )
 from app.services.document_service import DocumentService
 
@@ -52,6 +55,50 @@ async def options_batch_document_endpoint(
 ):
     """
     Handle preflight OPTIONS requests for batch document uploads.
+    """
+    # Set CORS headers for preflight request
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+        response.headers["Access-Control-Max-Age"] = "1800"  # Cache preflight for 30 minutes
+    return {}
+
+
+@router.options(
+    "/fetch-by-id",
+    status_code=200,
+)
+async def options_fetch_by_id_endpoint(
+    request: Request,
+    response: Response,
+):
+    """
+    Handle preflight OPTIONS requests for fetch by ID endpoint.
+    """
+    # Set CORS headers for preflight request
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+        response.headers["Access-Control-Max-Age"] = "1800"  # Cache preflight for 30 minutes
+    return {}
+
+
+@router.options(
+    "/batch-fetch-by-ids",
+    status_code=200,
+)
+async def options_batch_fetch_by_ids_endpoint(
+    request: Request,
+    response: Response,
+):
+    """
+    Handle preflight OPTIONS requests for batch fetch by IDs endpoint.
     """
     # Set CORS headers for preflight request
     origin = request.headers.get("Origin")
@@ -314,6 +361,360 @@ async def delete_document_endpoint(
         logger.error(f"Unexpected error in delete_document_endpoint: {e}")
         raise HTTPException(
             status_code=500, detail="An unexpected error occurred"
+        )
+
+
+@router.post(
+    "/fetch-by-id",
+    response_model=DocumentResponseSchema,
+    status_code=status.HTTP_200_OK,
+)
+async def fetch_document_by_id_endpoint(
+    request: Request,
+    response: Response,
+    data: DocumentByIdSchema,
+    document_service: DocumentService = Depends(get_document_service),
+) -> DocumentResponseSchema:
+    """
+    Fetch a document by ID from the external API, process it, and store it.
+    
+    Parameters
+    ----------
+    data : DocumentByIdSchema
+        The document ID to fetch.
+    document_service : DocumentService
+        The document service for processing the document.
+        
+    Returns
+    -------
+    DocumentResponseSchema
+        The processed document information.
+        
+    Raises
+    ------
+    HTTPException
+        If the document cannot be fetched or processed.
+    """
+    # Ensure CORS headers are present
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+    
+    logger.info(f"Fetching document by ID: {data.document_id}")
+    start_time = time.time()
+    
+    try:
+        # Fetch document text from external API and process it
+        document_id = await document_service.fetch_and_process_document_by_id(data.document_id)
+        
+        if document_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Failed to fetch or process document with ID: {data.document_id}",
+            )
+        
+        # Create a document response
+        document = Document(
+            id=document_id,
+            name=f"external-document-{data.document_id}",
+            author="external-api",
+            tag="fetched-by-id",
+            page_count=1,  # Default since we can't determine the actual page count
+        )
+        
+        total_time = time.time() - start_time
+        logger.info(f"Document fetch and processing completed in {total_time:.2f} seconds")
+        
+        return DocumentResponseSchema(**document.model_dump())
+        
+    except Exception as e:
+        logger.error(f"Error fetching document by ID: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred: {str(e)}",
+        )
+
+
+@router.options(
+    "/fetch-by-id",
+    status_code=200,
+)
+async def options_fetch_by_id_endpoint(
+    request: Request,
+    response: Response,
+):
+    """
+    Handle preflight OPTIONS requests for fetch by ID endpoint.
+    """
+    # Set CORS headers for preflight request
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+        response.headers["Access-Control-Max-Age"] = "1800"  # Cache preflight for 30 minutes
+    return {}
+
+
+@router.options(
+    "/batch-fetch-by-ids",
+    status_code=200,
+)
+async def options_batch_fetch_by_ids_endpoint(
+    request: Request,
+    response: Response,
+):
+    """
+    Handle preflight OPTIONS requests for batch fetch by IDs endpoint.
+    """
+    # Set CORS headers for preflight request
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+        response.headers["Access-Control-Max-Age"] = "1800"  # Cache preflight for 30 minutes
+    return {}
+
+
+@router.get(
+    "/get-metadata/{document_id}",
+    status_code=status.HTTP_200_OK,
+)
+async def get_document_metadata_endpoint(
+    request: Request,
+    response: Response,
+    document_id: str,
+    document_service: DocumentService = Depends(get_document_service),
+):
+    """
+    Fetch metadata of a document by its ID from the external OCR API.
+    This acts as a proxy to avoid CORS issues in the frontend.
+
+    Parameters
+    ----------
+    document_id : str
+        The document ID to fetch metadata for.
+    document_service : DocumentService
+        The document service for fetching document metadata.
+
+    Returns
+    -------
+    dict
+        Metadata of the document.
+
+    Raises
+    ------
+    HTTPException
+        If the document metadata cannot be fetched.
+    """
+    # Ensure CORS headers are present
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+
+    logger.info(f"Fetching metadata for document ID: {document_id}")
+
+    try:
+        # Fetch document metadata from external API via the service
+        metadata = await document_service.fetch_document_metadata_by_id(document_id)
+
+        if metadata is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Failed to fetch metadata for document ID: {document_id}",
+            )
+
+        # Return the raw metadata
+        return metadata
+
+    except Exception as e:
+        logger.error(f"Error fetching document metadata by ID: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred: {str(e)}",
+        )
+
+
+@router.options(
+    "/get-metadata/{document_id}",
+    status_code=200,
+)
+async def options_get_document_metadata_endpoint(
+    request: Request,
+    response: Response,
+):
+    """
+    Handle preflight OPTIONS requests for get document metadata endpoint.
+    """
+    # Set CORS headers for preflight request
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+        response.headers["Access-Control-Max-Age"] = "1800"  # Cache preflight for 30 minutes
+    return {}
+
+
+@router.get(
+    "/get-text/{document_id}",
+    status_code=status.HTTP_200_OK,
+)
+async def get_document_text_endpoint(
+    request: Request,
+    response: Response,
+    document_id: str,
+    document_service: DocumentService = Depends(get_document_service),
+):
+    """
+    Fetch text content of a document by its ID without processing it.
+    This is a simple proxy to the external OCR API.
+    
+    Parameters
+    ----------
+    document_id : str
+        The document ID to fetch text for.
+    document_service : DocumentService
+        The document service for fetching document text.
+        
+    Returns
+    -------
+    dict
+        Text content of the document.
+        
+    Raises
+    ------
+    HTTPException
+        If the document text cannot be fetched.
+    """
+    # Ensure CORS headers are present
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+    
+    logger.info(f"Fetching text for document ID: {document_id}")
+    
+    try:
+        # Fetch document text from external API
+        text = await document_service.fetch_document_text_by_id(document_id)
+        
+        if text is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Failed to fetch text for document ID: {document_id}",
+            )
+        
+        # Return the raw text
+        return {"document_id": document_id, "text": text}
+        
+    except Exception as e:
+        logger.error(f"Error fetching document text by ID: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred: {str(e)}",
+        )
+
+
+@router.options(
+    "/get-text/{document_id}",
+    status_code=200,
+)
+async def options_get_document_text_endpoint(
+    request: Request,
+    response: Response,
+):
+    """
+    Handle preflight OPTIONS requests for get document text endpoint.
+    """
+    # Set CORS headers for preflight request
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+        response.headers["Access-Control-Max-Age"] = "1800"  # Cache preflight for 30 minutes
+    return {}
+
+
+@router.post(
+    "/batch-fetch-by-ids",
+    response_model=BatchFetchResponseSchema,
+    status_code=status.HTTP_200_OK,
+)
+async def batch_fetch_documents_by_ids_endpoint(
+    request: Request,
+    response: Response,
+    data: BatchFetchByIdsSchema,
+    document_service: DocumentService = Depends(get_document_service),
+) -> BatchFetchResponseSchema:
+    """
+    Fetch and process multiple documents by their IDs in parallel.
+    
+    Parameters
+    ----------
+    data : BatchFetchByIdsSchema
+        The list of document IDs to fetch and process.
+    document_service : DocumentService
+        The document service for processing the documents.
+        
+    Returns
+    -------
+    BatchFetchResponseSchema
+        Information about the processed documents.
+        
+    Raises
+    ------
+    HTTPException
+        If an error occurs during batch processing.
+    """
+    # Ensure CORS headers are present
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+    
+    if not data.document_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No document IDs provided",
+        )
+    
+    logger.info(f"Batch fetching {len(data.document_ids)} documents by ID")
+    start_time = time.time()
+    
+    try:
+        # Process all document IDs in parallel with controlled concurrency
+        results = await document_service.batch_process_documents_by_ids(
+            data.document_ids,
+            max_concurrent=data.max_concurrent
+        )
+        
+        total_time = time.time() - start_time
+        logger.info(f"Batch document fetch completed in {total_time:.2f} seconds")
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error in batch document fetch: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred during batch processing: {str(e)}",
         )
 
 

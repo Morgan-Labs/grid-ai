@@ -46,9 +46,11 @@ export interface Store {
 
   insertRowBefore: (id?: string) => void;
   insertRowAfter: (id?: string) => void;
-  fillRow: (id: string, file: File) => Promise<void>;
+  // Updated fillRow signature to accept optional options
+  fillRow: (id: string, file: File, options?: { showNotification?: boolean }) => Promise<void>;
   fillRows: (files: File[]) => Promise<void>;
-  rerunRows: (ids: string[]) => void;
+  // Add option to suppress progress notification
+  rerunRows: (ids: string[], options?: { suppressInProgressNotification?: boolean }) => void;
   clearRows: (ids: string[]) => void;
   deleteRows: (ids: string[]) => void;
 
@@ -56,7 +58,8 @@ export interface Store {
     cells: { rowId: string; columnId: string; cell: CellValue }[],
     tableId?: string
   ) => void;
-  rerunCells: (cells: { rowId: string; columnId: string }[]) => void;
+  // Add option to suppress progress notification
+  rerunCells: (cells: { rowId: string; columnId: string }[], options?: { suppressInProgressNotification?: boolean }) => void;
   clearCells: (cells: { rowId: string; columnId: string }[]) => void;
 
   addGlobalRules: (rules: Omit<AnswerTableGlobalRule, "id">[]) => void;
@@ -73,6 +76,9 @@ export interface Store {
 
   // Add document preview content to the store
   addDocumentPreview: (documentId: string, content: string[]) => void;
+
+  // Ingest single document by ID (for context menu)
+  ingestSingleDocumentById: (documentId: string, rowId: string, originalColumnId: string) => Promise<{ success: boolean }>;
   
   // Table state persistence
   saveTableState: () => Promise<void>;

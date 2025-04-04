@@ -111,6 +111,11 @@ class Settings(BaseSettings):
     auth_password: Optional[str] = None
     jwt_secret: Optional[str] = None
     
+    # DOCUMENT API CONFIG
+    document_api_endpoint: str = "https://ocr.api.mx2.law/doc/{}/text?token={}" # Endpoint for fetching text
+    document_metadata_api_endpoint: str = "https://ocr.api.mx2.law/doc/{}" # Endpoint for fetching metadata
+    document_api_token: Optional[str] = None
+    
     # LANGSMITH CONFIG
     langsmith_tracing: bool = False
     langsmith_endpoint: str = "https://api.smith.langchain.com"

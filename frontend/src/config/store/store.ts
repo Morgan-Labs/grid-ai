@@ -24,7 +24,8 @@ import {
   toSingleType
 } from "./store.utils";
 import { AnswerTableRow, ResolvedEntity, SourceData, Store } from "./store.types";
-import { ApiError, runBatchQueries, uploadFile } from "../api";
+// Import API_ENDPOINTS
+import { ApiError, runBatchQueries, uploadFile, API_ENDPOINTS } from "../api";
 import { AuthError, login as apiLogin, verifyToken } from "../../services/api/auth";
 import { 
   saveTableState as apiSaveTableState, 
@@ -378,7 +379,8 @@ export const useStore = create<Store>()(
         });
       },
 
-      fillRow: async (id, file) => {
+      // Updated fillRow to accept an options object
+      fillRow: async (id: string, file: File, options = { showNotification: true }) => {
         const { activeTableId, getTable, editTable } = get();
         try {
           const document = await uploadFile(file);
@@ -387,20 +389,24 @@ export const useStore = create<Store>()(
             document
           };
           
+          // Update only the sourceData, preserving existing cells
           editTable(activeTableId, {
             rows: where(getTable(activeTableId).rows, r => r.id === id, {
-              sourceData,
-              cells: {}
+              sourceData
             })
           });
           
-          get().rerunRows([id]);
+          // Pass option to suppress the "Processing in progress" notification from rerunCells
+          get().rerunRows([id], { suppressInProgressNotification: true });
           
-          notifications.show({
-            title: 'Document uploaded',
-            message: `Successfully uploaded ${document.name}`,
-            color: 'green'
-          });
+          // Conditionally show notification based on options
+          if (options.showNotification) {
+            notifications.show({
+              title: 'Document uploaded',
+              message: `Successfully uploaded ${document.name}`,
+              color: 'green'
+            });
+          }
         } catch (error) {
           console.error('Error uploading document:', error);
           
@@ -554,14 +560,130 @@ export const useStore = create<Store>()(
         }
       },
 
-      rerunRows: ids => {
+      // --- NEW ACTION: Ingest a single document by ID ---
+      // Add types to parameters
+      ingestSingleDocumentById: async (documentId: string, rowId: string, originalColumnId: string) => {
+        const { auth, getTable, editTable, fillRow, editCells } = get();
+        
+        if (!auth.token) {
+          console.error('Authentication token not found.');
+          notifications.show({ title: 'Authentication Error', message: 'Please log in again.', color: 'red' });
+          return { success: false };
+        }
+        
+        try {
+          console.log(`Processing document ID: ${documentId}`);
+
+          // 1. Fetch text content first
+          const textResponse = await fetch(`${API_ENDPOINTS.DOCUMENT_GET_TEXT(documentId)}`, {
+            method: 'GET',
+            credentials: 'include',
+            headers: {
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${auth.token}`,
+            }
+          });
+
+          if (!textResponse.ok) {
+            const errorText = await textResponse.text();
+            console.error(`Failed to fetch text for document ID: ${documentId}`, textResponse.status, errorText);
+            notifications.show({ title: 'Fetch Error', message: `Failed to get text for ${documentId}: ${textResponse.statusText}`, color: 'red' });
+            return { success: false };
+          }
+
+          const textData = await textResponse.json();
+          if (!textData.text) {
+            console.error(`No text content for document ID: ${documentId}`);
+            notifications.show({ title: 'Fetch Error', message: `No text content found for ${documentId}`, color: 'orange' });
+            return { success: false };
+          }
+
+          // 2. Fetch metadata *only* to get the display name
+          let displayName = `${documentId}.txt`; // Default display name
+          try {
+            const metadataResponse = await fetch(`${API_ENDPOINTS.DOCUMENT_GET_METADATA(documentId)}`, {
+              method: 'GET',
+              credentials: 'include',
+              headers: {
+                'Accept': 'application/json',
+                'Authorization': `Bearer ${auth.token}`,
+              }
+            });
+
+            if (metadataResponse.ok) {
+              const metadataData = await metadataResponse.json();
+              if (metadataData.metadata && metadataData.metadata.name) {
+                displayName = metadataData.metadata.name; // Use real name for display later
+              }
+            } else {
+               console.warn(`Could not fetch metadata for ${documentId}, using default name.`);
+            }
+          } catch (metadataError) {
+            console.error(`Error fetching metadata for document ID: ${documentId}`, metadataError);
+            // If metadata fetch fails, we'll use the default display name
+          }
+
+          // 3. Create the File object ALWAYS using .txt extension and text/plain type
+          const uploadFileName = `${documentId}.txt`; // Ensure backend gets .txt
+          const textBlob = new Blob([textData.text], { type: 'text/plain' });
+          const file = new File([textBlob], uploadFileName, { type: 'text/plain' });
+
+          // Save the original cell value before it gets cleared by fillRow (if applicable)
+          const originalCellValue = getTable().rows.find(r => r.id === rowId)?.cells[originalColumnId];
+
+          // 4. Upload the text file using fillRow, suppressing the individual notification
+          await fillRow(rowId, file, { showNotification: false });
+
+          // 5. Update the display name in the store AFTER successful upload
+          const currentTable = getTable();
+          editTable(currentTable.id, {
+            rows: currentTable.rows.map(row => {
+              if (row.id === rowId && row.sourceData?.type === 'document') {
+                return {
+                  ...row,
+                  sourceData: {
+                    ...row.sourceData,
+                    document: {
+                      ...row.sourceData.document,
+                      name: displayName // Update the name here
+                    }
+                  }
+                };
+              }
+              return row;
+            })
+          });
+
+          // 6. Restore the original cell value in the document ID column if it existed
+          if (originalColumnId && originalCellValue !== undefined) {
+            editCells([{
+              rowId: rowId,
+              columnId: originalColumnId,
+              cell: originalCellValue
+            }]);
+          }
+          
+          console.log(`Successfully processed and ingested document ID: ${documentId}`);
+          return { success: true };
+
+        } catch (error) {
+          console.error(`Error processing document ID: ${documentId}`, error);
+          notifications.show({ title: 'Ingestion Error', message: `Failed to process ${documentId}: ${error instanceof Error ? error.message : 'Unknown error'}`, color: 'red' });
+          return { success: false };
+        }
+      },
+      // --- END NEW ACTION ---
+
+      // Updated to accept options
+      rerunRows: (ids, options = { suppressInProgressNotification: false }) => {
         const { getTable, rerunCells } = get();
         rerunCells(
           getTable()
             .columns.filter(column => !column.hidden)
             .flatMap(column =>
               ids.map(id => ({ rowId: id, columnId: column.id }))
-            )
+            ),
+          options // Pass options down to rerunCells
         );
       },
 
@@ -607,7 +729,8 @@ export const useStore = create<Store>()(
         });
       },
 
-      rerunCells: cells => {
+      // Updated to accept options
+      rerunCells: (cells, options = { suppressInProgressNotification: false }) => {
         const { activeTableId, getTable, editTable, editCells } = get();
         const currentTable = getTable();
         const { columns, rows, globalRules, loadingCells } = currentTable;
@@ -617,13 +740,15 @@ export const useStore = create<Store>()(
         // Check if there's already a batch query in progress
         const requestProgress = currentTable.requestProgress;
         if (requestProgress && requestProgress.inProgress) {
-          // Show a notification that a query is already in progress
-          notifications.show({
-            title: 'Processing in progress',
-            message: 'Please wait for the current operation to complete before starting a new one.',
-            color: 'blue',
-            autoClose: 3000
-          });
+          // Conditionally show notification based on options
+          if (!options.suppressInProgressNotification) {
+            notifications.show({
+              title: 'Processing in progress',
+              message: 'Please wait for the current operation to complete before starting a new one.',
+              color: 'blue',
+              autoClose: 3000
+            });
+          }
           return; // Exit early
         }
       

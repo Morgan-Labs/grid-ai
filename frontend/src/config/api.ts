@@ -58,6 +58,10 @@ export const API_ENDPOINTS = {
   DOCUMENT_UPLOAD: `${API_URL}/api/v1/document`,
   BATCH_DOCUMENT_UPLOAD: `${API_URL}/api/v1/document/batch`,
   DOCUMENT_PROCESS: `${API_URL}/api/v1/document/process`,
+  DOCUMENT_FETCH_BY_ID: `${API_URL}/api/v1/document/fetch-by-id`,
+  DOCUMENT_BATCH_FETCH_BY_IDS: `${API_URL}/api/v1/document/batch-fetch-by-ids`,
+  DOCUMENT_GET_TEXT: (id: string) => `${API_URL}/api/v1/document/get-text/${id}`,
+  DOCUMENT_GET_METADATA: (id: string) => `${API_URL}/api/v1/document/get-metadata/${id}`,
   DOCUMENT_PREVIEW: (id: string) => `${API_URL}/api/v1/document/${id}/preview`,
   
   // Graph endpoints

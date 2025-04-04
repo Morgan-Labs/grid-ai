@@ -8,6 +8,7 @@ import { KtResolvedEntities } from "./kt-resolved-entities";
 import { KtDownload } from "./kt-download";
 import { KtCsvUpload } from "../kt-csv-upload";
 import { KtChunks } from "./kt-chunks";
+import { KtDocumentIds } from "./kt-document-ids";
 import { useStore } from "@config/store";
 
 export function KtControls(props: BoxProps) {
@@ -16,6 +17,7 @@ export function KtControls(props: BoxProps) {
   return (
     <Group className="excel-ribbon" p="xs" {...props}>
       <KtCsvUpload />
+      <KtDocumentIds />
       <KtDownload.Csv />
       <KtClear />
       <Button

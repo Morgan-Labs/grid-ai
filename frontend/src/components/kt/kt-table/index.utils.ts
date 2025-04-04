@@ -1,8 +1,11 @@
 import { ReactGridProps, HeaderCell, CellChange } from "@silevis/reactgrid";
-import { isEmpty, mapValues, uniqBy } from "lodash-es";
+// Remove unused mapValues, castArray, CellValue
+import { isEmpty, uniqBy } from "lodash-es"; 
 import { KtColumnCell, KtRowCell, KtCell } from "./kt-cells";
 import { useStore } from "@config/store";
 import { pack, plur } from "@utils/functions";
+// import { CellValue } from "@config/store/store.types"; // Removed unused import
+import { notifications } from "@utils/notifications";
 
 export type Cell = HeaderCell | KtColumnCell | KtRowCell | KtCell;
 
@@ -34,6 +37,7 @@ export const handleContextMenu: Required<ReactGridProps>["onContextMenu"] = (
   selectedRanges
 ) => {
   const store = useStore.getState();
+  const table = store.getTable(); // Get current table state
   const rowIds = selectedRowIds_
     .filter(rowId => rowId !== HEADER_ROW_ID)
     .map(String);
@@ -41,36 +45,118 @@ export const handleContextMenu: Required<ReactGridProps>["onContextMenu"] = (
     .filter(colId => colId !== SOURCE_COLUMN_ID)
     .map(String);
 
+  // Reverted variable name back to 'cells' for consistency
   const cells = uniqBy(
     selectedRanges
       .flat()
-      .filter(
-        c => c.rowId !== HEADER_ROW_ID && c.columnId !== SOURCE_COLUMN_ID
-      ),
+      .filter(c => c.rowId !== HEADER_ROW_ID && c.columnId !== SOURCE_COLUMN_ID),
     c => `${c.rowId}-${c.columnId}`
-  ).map(cell => mapValues(cell, String));
+  ).map(cell => ({ // Keep original mapping structure
+    rowId: String(cell.rowId),
+    columnId: String(cell.columnId),
+  }));
+
 
   return pack([
+    // Options for single or multiple cell selections (but not full rows/columns)
     !isEmpty(cells) &&
       isEmpty(rowIds) &&
       isEmpty(colIds) && [
+        // --- Keep existing cell options using original 'cells' variable ---
         {
           id: "rerun-cells",
-          label: `Rerun ${plur("cell", cells)}`,
+          label: `Rerun ${plur("cell", cells.length)}`, // Use cells.length for plur
           handler: () => store.rerunCells(cells)
         },
         {
           id: "clear-cells",
-          label: `Clear ${plur("cell", cells)}`,
+          label: `Clear ${plur("cell", cells.length)}`, // Use cells.length for plur
           handler: () => store.clearCells(cells)
         },
         {
           id: "chunks",
           label: "View chunks",
           handler: () => store.openChunks(cells)
+        },
+        // --- NEW: Ingest SFID Option for Cells (Added here) ---
+        {
+          id: "ingest-sfid-cells",
+          // Revert plur cast, use original cells.length
+          label: `Ingest ${plur("Document", cells.length)} (SFID)`, 
+          handler: async () => {
+            // Get full cell details only when the handler is invoked
+            const cellsToProcess = cells.map(loc => {
+              const row = table.rows.find(r => r.id === loc.rowId);
+              const cellValue = row?.cells[loc.columnId]; // Use original columnId
+              let textValue: string | null = null;
+              // Extract text value regardless of cell type
+              if (typeof cellValue === 'string') {
+                textValue = cellValue;
+              } else if (typeof cellValue === 'object' && cellValue && 'text' in cellValue) {
+                // Ensure 'text' property exists and is a string before accessing
+                textValue = typeof cellValue.text === 'string' ? cellValue.text : null;
+              }
+              return { ...loc, textValue: textValue?.trim() };
+            }).filter(c => c.textValue); // Filter for cells with actual text *inside* the handler
+
+            if (isEmpty(cellsToProcess)) {
+              notifications.show({ title: 'No IDs Found', message: 'Selected cells are empty or do not contain text.', color: 'orange' });
+              return;
+            }
+
+            const totalToIngest = cellsToProcess.length;
+            
+            // Set initial progress state in the store
+            store.editActiveTable({
+              requestProgress: {
+                total: totalToIngest,
+                completed: 0,
+                inProgress: true,
+                error: false
+              }
+            });
+
+            let successCount = 0;
+            // Process sequentially
+            for (const cell of cellsToProcess) {
+              // Check textValue again just in case
+              if (cell.textValue) {
+                 const result = await store.ingestSingleDocumentById(
+                   cell.textValue,
+                   cell.rowId,
+                   cell.columnId // Pass the original column ID
+                 );
+                 if (result.success) {
+                   successCount++;
+                 }
+                 // Update progress after each attempt
+                 const currentProgress = store.getTable().requestProgress || { total: totalToIngest, completed: 0, inProgress: true };
+                 store.editActiveTable({
+                   requestProgress: {
+                     ...currentProgress,
+                     completed: Math.min(currentProgress.completed + 1, totalToIngest) 
+                   }
+                 });
+              }
+            }
+
+            // Finalize progress state in the store
+            store.editActiveTable({
+              requestProgress: {
+                total: totalToIngest,
+                completed: totalToIngest, // Mark as fully completed for UI
+                inProgress: false,
+                error: successCount < totalToIngest // Set error flag if not all succeeded
+              }
+            });
+            
+            // No separate notification needed here, progress bar handles it.
+          }
         }
+        // --- End Ingest SFID Option for Cells ---
       ],
-    ...options.filter(option => option.id !== "cut"),
+    // --- Keep all other existing menu groups untouched ---
+    ...options.filter(option => option.id !== "cut"), // Keep default copy/paste etc.
     rowIds.length === 1 && [
       {
         id: "insert-row-before",
