@@ -9,6 +9,7 @@ import { KtDownload } from "./kt-download";
 import { KtCsvUpload } from "../kt-csv-upload";
 import { KtChunks } from "./kt-chunks";
 import { KtDocumentIds } from "./kt-document-ids";
+import { KtTimestamp } from "./kt-timestamp";
 import { useStore } from "@config/store";
 
 export function KtControls(props: BoxProps) {
@@ -31,6 +32,7 @@ export function KtControls(props: BoxProps) {
       <KTGlobalRules />
       <KtResolvedEntities />
       <KtChunks />
+      <KtTimestamp />
       
       {uploadingFiles && (
         <Group>

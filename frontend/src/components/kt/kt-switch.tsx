@@ -7,7 +7,8 @@ import {
   TextInput,
   ActionIcon,
   Tooltip,
-  Badge
+  Badge,
+  Stack
 } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { useInputState } from "@mantine/hooks";
@@ -18,14 +19,31 @@ import {
   IconPlus,
   IconTable,
   IconTrash,
-  IconWand
+  IconWand,
+  IconClock
 } from "@tabler/icons-react";
 import { AnswerTable, useStore } from "@config/store";
 import { useDerivedState } from "@hooks";
+import { listTableStates, TableState } from "../../services/api/table-state";
+import { useState, useEffect } from "react";
 
 export function KtSwitch(props: BoxProps) {
   const table = useStore(store => store.getTable());
   const tables = useStore(store => store.tables);
+  const [tableStates, setTableStates] = useState<TableState[]>([]);
+  const [sortByUpdated, setSortByUpdated] = useState(true);
+
+  useEffect(() => {
+    const fetchTableStates = async () => {
+      try {
+        const response = await listTableStates();
+        setTableStates(response.items);
+      } catch (error) {
+        console.error('Failed to fetch table states:', error);
+      }
+    };
+    fetchTableStates();
+  }, []);
 
   const handleNewTable = () => {
     modals.open({
@@ -56,6 +74,38 @@ export function KtSwitch(props: BoxProps) {
     });
   };
 
+  const getLastUpdated = (tableId: string) => {
+    const tableState = tableStates.find(state => state.id === tableId);
+    if (!tableState) return null;
+    const date = new Date(tableState.updated_at + 'Z');
+    return {
+      short: date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      }),
+      full: date.toLocaleString('en-US', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZoneName: 'short'
+      })
+    };
+  };
+
+  const sortedTables = [...tables].sort((a, b) => {
+    if (sortByUpdated) {
+      const aUpdated = tableStates.find(state => state.id === a.id)?.updated_at;
+      const bUpdated = tableStates.find(state => state.id === b.id)?.updated_at;
+      if (!aUpdated || !bUpdated) return 0;
+      return new Date(bUpdated).getTime() - new Date(aUpdated).getTime();
+    } else {
+      return a.name.localeCompare(b.name);
+    }
+  });
+
   return (
     <Group gap="xs" {...props}>
       <Group gap="xs">
@@ -70,17 +120,44 @@ export function KtSwitch(props: BoxProps) {
             </Button>
           </Menu.Target>
           <Menu.Dropdown>
-            <Menu.Label>Tables</Menu.Label>
-            {tables.map(t => (
-              <Menu.Item
-                key={t.id}
-                leftSection={<IconTable size={16} />}
-                onClick={() => useStore.getState().switchTable(t.id)}
-                rightSection={t.id === table.id && <Badge size="xs" variant="light">Active</Badge>}
-              >
-                {t.name}
-              </Menu.Item>
-            ))}
+            <Menu.Label>
+              <Group justify="space-between">
+                <Text>Tables</Text>
+                <Tooltip label={sortByUpdated ? "Sort by name" : "Sort by last updated"}>
+                  <ActionIcon 
+                    variant="subtle" 
+                    onClick={() => setSortByUpdated(!sortByUpdated)}
+                    color={sortByUpdated ? "blue" : "gray"}
+                  >
+                    <IconClock size={16} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+            </Menu.Label>
+            {sortedTables.map(t => {
+              const lastUpdated = getLastUpdated(t.id);
+              return (
+                <Menu.Item
+                  key={t.id}
+                  leftSection={<IconTable size={16} />}
+                  onClick={() => useStore.getState().switchTable(t.id)}
+                  rightSection={
+                    <Stack gap={0} align="end">
+                      {t.id === table.id && <Badge size="xs" variant="light">Active</Badge>}
+                      {lastUpdated && (
+                        <Tooltip label={lastUpdated.full}>
+                          <Text size="xs" c="dimmed">
+                            {lastUpdated.short}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Stack>
+                  }
+                >
+                  {t.name}
+                </Menu.Item>
+              );
+            })}
             <Menu.Divider />
             <Menu.Item 
               leftSection={<IconPlus size={16} />} 

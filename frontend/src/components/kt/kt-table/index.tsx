@@ -51,7 +51,7 @@ export function KtTable(props: BoxProps) {
   if (safeCurrentPage !== currentPage) {
     setCurrentPage(safeCurrentPage);
   }
-  
+
   // Apply pagination to filtered rows
   const visibleRows = useMemo(() => {
     const startIndex = (safeCurrentPage - 1) * pageSize;
