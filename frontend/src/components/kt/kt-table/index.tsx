@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Column, ReactGrid, Row } from "@silevis/reactgrid";
-import { BoxProps, ScrollArea, Pagination, Group, Text, Select, Stack, Box, ComboboxItem } from "@mantine/core";
+import { BoxProps, ScrollArea, Pagination, Group, Text, Select, Stack, Box, ComboboxItem, LoadingOverlay } from "@mantine/core";
 import {
   Cell,
   handleCellChange,
@@ -24,6 +24,20 @@ const PAGE_SIZES = [10, 25, 50, 100];
 
 export function KtTable(props: BoxProps) {
   const table = useStore(store => store.getTable());
+  const isAuthenticated = useStore(state => state.auth.isAuthenticated);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Add effect to handle loading state
+  useEffect(() => {
+    if (isAuthenticated) {
+      // Set loading to false after a short delay to ensure smooth transition
+      const timer = setTimeout(() => {
+        setIsLoading(false);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [isAuthenticated]);
+
   const columns = table.columns;
   const rows = table.rows;
   
@@ -118,37 +132,45 @@ export function KtTable(props: BoxProps) {
   return (
     <Stack gap="sm" pb={0} {...props}>
       <KtProgressBar />
-      <ScrollArea
-        style={{ flex: 1 }}
-        className={cn(classes.reactGridWrapper, props.className)}
-      >
-        <ReactGrid
-          enableRangeSelection
-          enableColumnSelection
-          enableRowSelection
-          minColumnWidth={100}
-          columns={gridColumns}
-          rows={gridRows}
-          onContextMenu={handleContextMenu}
-          onCellsChanged={handleCellChange}
-          onColumnResized={(columnId, width) => {
-            if (columnId === SOURCE_COLUMN_ID) {
-              // Update the custom property in the store
-              useStore.getState().editActiveTable({
-                // @ts-ignore - Adding a custom property to the table object
-                sourceColumnWidth: width
-              });
-            } else {
-              useStore.getState().editColumn(String(columnId), { width });
-            }
-          }}
-          customCellTemplates={{
-            "kt-cell": new KtCellTemplate(),
-            "kt-column": new KtColumnCellTemplate(),
-            "kt-row": new KtRowCellTemplate()
-          }}
+      <Box pos="relative">
+        <LoadingOverlay 
+          visible={isLoading} 
+          zIndex={1000} 
+          overlayProps={{ blur: 2 }}
+          loaderProps={{ type: 'dots' }}
         />
-      </ScrollArea>
+        <ScrollArea
+          style={{ flex: 1 }}
+          className={cn(classes.reactGridWrapper, props.className)}
+        >
+          <ReactGrid
+            enableRangeSelection
+            enableColumnSelection
+            enableRowSelection
+            minColumnWidth={100}
+            columns={gridColumns}
+            rows={gridRows}
+            onContextMenu={handleContextMenu}
+            onCellsChanged={handleCellChange}
+            onColumnResized={(columnId, width) => {
+              if (columnId === SOURCE_COLUMN_ID) {
+                // Update the custom property in the store
+                useStore.getState().editActiveTable({
+                  // @ts-ignore - Adding a custom property to the table object
+                  sourceColumnWidth: width
+                });
+              } else {
+                useStore.getState().editColumn(String(columnId), { width });
+              }
+            }}
+            customCellTemplates={{
+              "kt-cell": new KtCellTemplate(),
+              "kt-column": new KtColumnCellTemplate(),
+              "kt-row": new KtRowCellTemplate()
+            }}
+          />
+        </ScrollArea>
+      </Box>
       
       {totalRows > 10 && (
         <Box px="md" py="xs" className={classes.paginationContainer}>

@@ -6,6 +6,7 @@ import os
 import sqlite3
 from datetime import datetime
 from typing import Dict, List, Optional, Any
+from functools import lru_cache
 
 from app.core.config import get_settings
 from app.models.table_state import TableState
@@ -86,9 +87,11 @@ def init_db():
 # Initialize the database when the module is loaded
 init_db()
 
-
 class TableStateService:
     """Service for managing table state data using SQLite."""
+    
+    # Cache the most recent table states
+    _cache = {}
     
     @staticmethod
     def save_table_state(table_state: TableState) -> TableState:
@@ -109,22 +112,22 @@ class TableStateService:
             exists = cursor.fetchone() is not None
             
             if exists:
-                # Update the existing table state
+                # Update existing table state
                 cursor.execute(
-                    "UPDATE table_states SET name = ?, user_id = ?, data = ?, updated_at = ? WHERE id = ?",
-                    (
-                        table_state.name,
-                        table_state.user_id,
-                        data_json,
-                        table_state.updated_at.isoformat(),
-                        table_state.id
-                    )
+                    """
+                    UPDATE table_states 
+                    SET name = ?, data = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (table_state.name, data_json, table_state.updated_at.isoformat(), table_state.id)
                 )
-                logger.info(f"Updated table state {table_state.id} in database")
             else:
-                # Insert a new table state
+                # Insert new table state
                 cursor.execute(
-                    "INSERT INTO table_states (id, name, user_id, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    """
+                    INSERT INTO table_states (id, name, user_id, data, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
                     (
                         table_state.id,
                         table_state.name,
@@ -134,24 +137,29 @@ class TableStateService:
                         table_state.updated_at.isoformat()
                     )
                 )
-                logger.info(f"Inserted new table state {table_state.id} into database")
             
             # Commit the transaction
             conn.commit()
             
+            # Clear the cache
+            TableStateService._cache.clear()
+            
+            logger.info(f"Saved table state {table_state.id} to database")
             return table_state
         except Exception as e:
-            # Rollback the transaction on error
-            conn.rollback()
             logger.error(f"Error saving table state {table_state.id}: {e}")
             raise
         finally:
-            # Close the connection
             conn.close()
     
     @staticmethod
+    @lru_cache(maxsize=100)
     def get_table_state(table_id: str) -> Optional[TableState]:
         """Get a table state by ID from the SQLite database."""
+        # Check cache first
+        if table_id in TableStateService._cache:
+            return TableStateService._cache[table_id]
+        
         # Connect to the database
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -181,14 +189,15 @@ class TableStateService:
                 updated_at=datetime.fromisoformat(row[5])
             )
             
-            logger.info(f"Loaded table state {table_id} from database")
+            # Cache the result
+            TableStateService._cache[table_id] = table_state
             
+            logger.info(f"Loaded table state {table_id} from database")
             return table_state
         except Exception as e:
             logger.error(f"Error loading table state {table_id}: {e}")
             return None
         finally:
-            # Close the connection
             conn.close()
     
     @staticmethod
@@ -199,9 +208,14 @@ class TableStateService:
         cursor = conn.cursor()
         
         try:
-            # Query all table states
+            # Query all table states with a limit to prevent memory issues
             cursor.execute(
-                "SELECT id, name, user_id, data, created_at, updated_at FROM table_states ORDER BY updated_at DESC"
+                """
+                SELECT id, name, user_id, data, created_at, updated_at 
+                FROM table_states 
+                ORDER BY updated_at DESC 
+                LIMIT 100
+                """
             )
             rows = cursor.fetchall()
             
@@ -221,16 +235,16 @@ class TableStateService:
                     updated_at=datetime.fromisoformat(row[5])
                 )
                 
+                # Cache the result
+                TableStateService._cache[table_state.id] = table_state
                 table_states.append(table_state)
             
             logger.info(f"Listed {len(table_states)} table states from database")
-            
             return table_states
         except Exception as e:
             logger.error(f"Error listing table states: {e}")
             return []
         finally:
-            # Close the connection
             conn.close()
     
     @staticmethod

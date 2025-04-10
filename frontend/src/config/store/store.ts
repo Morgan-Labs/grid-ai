@@ -42,6 +42,7 @@ export const useStore = create<Store>()(
       ...getInitialData(),
       activePopoverId: null,
       documentPreviews: {}, // Initialize empty document previews
+      isLoading: false, // Add isLoading to initial state
       auth: {
         token: null,
         isAuthenticated: false,
@@ -1474,12 +1475,16 @@ export const useStore = create<Store>()(
         }
         
         try {
+          // Set loading state
+          set({ isLoading: true });
+          
           try {
             // Get all table states
             const response = await listTableStates();
             
             // If no table states, return
             if (!response.items || response.items.length === 0) {
+              set({ isLoading: false });
               return Promise.resolve();
             }
             
@@ -1505,19 +1510,20 @@ export const useStore = create<Store>()(
             // Set all tables and make the most recent one active
             set({
               tables,
-              activeTableId: tables.length > 0 ? tables[0].id : get().activeTableId
+              activeTableId: tables.length > 0 ? tables[0].id : get().activeTableId,
+              isLoading: false
             });
             
-            // No logs for normal operation
             return Promise.resolve();
           } catch (apiError) {
-            // Log the error but don't reject the promise
             console.error('Error loading table state from API:', apiError);
+            set({ isLoading: false });
             return Promise.resolve();
           }
         } catch (error) {
           console.error('Error processing loaded table state:', error);
-          return Promise.resolve(); // Resolve instead of reject to avoid error notifications
+          set({ isLoading: false });
+          return Promise.resolve();
         }
       },
       // Import CSV data into the grid

@@ -85,6 +85,9 @@ export interface Store {
   loadLatestTableState: () => Promise<void>;
   
   clear: (allTables?: boolean) => void;
+
+  // Loading state
+  isLoading: boolean;
 }
 
 export interface ResolvedEntity {
