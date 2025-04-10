@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
 import {
   Box,
   BoxProps,
@@ -61,6 +61,15 @@ export function KtColumnSettings({
   ...props
 }: Props) {
   const [state, handlers] = useDerivedState(value, isEqual);
+
+  useEffect(() => {
+    if (handlers.dirty) {
+      const timeoutId = setTimeout(() => {
+        onChange(state);
+      }, 2000); // 2 second delay before auto-saving
+      return () => clearTimeout(timeoutId);
+    }
+  }, [state, handlers.dirty, onChange]);
 
   const typeOption = useMemo(
     () => typeOptions.find(option => option.value === state.type),
