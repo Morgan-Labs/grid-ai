@@ -210,7 +210,7 @@ export function KtDocumentIds() {
         size="sm"
         onClick={() => setOpened(true)}
       >
-        Ingest Documents (SFID)
+        Ingest Documents
       </Button>
       
       <Modal 

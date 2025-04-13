@@ -24,8 +24,8 @@ import {
   IconTrash,
   IconRobot,
   IconBrandOpenai,
-  IconBrain,
-  IconBrandGoogle
+  IconBrandAws,
+  IconBrandGoogle,
 } from "@tabler/icons-react";
 import { cloneDeep, isEmpty, isEqual, isString } from "lodash-es";
 import { KtColumnQuestion } from "./kt-column-question";
@@ -301,9 +301,9 @@ export function KtColumnSettings({
             label="LLM Model"
             rightSection={
               <Group c="dimmed">
-                {state.llmModel && state.llmModel.includes("claude") && <IconBrain size={16} />}
+                {state.llmModel && state.llmModel.includes("claude") && <IconBrandAws size={16} />}
                 {state.llmModel && state.llmModel.includes("gemini") && <IconBrandGoogle size={16} />}
-                {state.llmModel && (state.llmModel.includes("gpt") || !state.llmModel.includes("claude|gemini")) && <IconBrandOpenai size={16} />}
+                {state.llmModel && (state.llmModel.includes("gpt")) && <IconBrandOpenai size={16} />}
                 {!state.llmModel && <IconRobot size={16} />}
                 <Text>
                   {state.llmModel || "Default"}
@@ -336,16 +336,16 @@ export function KtColumnSettings({
                     }
                   </Group>
                 </Box>
-                
-                {/* Anthropic Models */}
+
+                {/* Bedrock Anthropic Models */}
                 <Box mb="md">
                   <Group mb="xs">
-                    <IconBrain size={18} />
-                    <Text fw={500}>Anthropic</Text>
+                    <IconBrandAws size={18} />
+                    <Text fw={500}>AWS Bedrock Anthropic</Text>
                   </Group>
                   <Group gap="xs">
                     {llmOptions
-                      .filter(model => model.provider === "anthropic")
+                      .filter(model => model.provider === "bedrock")
                       .map(model => (
                         <Button
                           key={model.model}

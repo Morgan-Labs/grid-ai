@@ -47,7 +47,11 @@ export const llmOptions: LLMOption[] = [
   { provider: "anthropic", model: "claude-3-7-sonnet-20250219", label: "Claude 3.7 Sonnet" },
   { provider: "anthropic", model: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet" },
   { provider: "anthropic", model: "claude-3-opus-20240229", label: "Claude 3 Opus" },
-  
+
+  { provider: "bedrock", model: "us.anthropic.claude-3-7-sonnet-20250219-v1:0", label: "Claude 3.7 Sonnet" },
+  { provider: "bedrock", model: "us.anthropic.claude-3-5-sonnet-20241022-v2:0", label: "Claude 3.5 Sonnet" },
+  { provider: "bedrock", model: "us.anthropic.claude-3-5-haiku-20241022-v1:0", label: "Claude 3.5 Opus" },
+
   // Google models
   { provider: "gemini", model: "gemini-2.5-pro-exp-03-25", label: "Gemini 2.5 Pro Exp" },
   { provider: "gemini", model: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },

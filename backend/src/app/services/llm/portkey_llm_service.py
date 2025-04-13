@@ -50,7 +50,8 @@ class PortkeyLLMService(CompletionService):
         self.provider_keys = {
             "openai": "openai-6a3e17",
             "anthropic": "anthropic-a27fda",
-            "gemini": "gemini-3161fc"
+            "gemini": "gemini-3161fc",
+            "bedrock": "bedrock-77eded"
         }
 
     async def generate_completion(
@@ -132,12 +133,14 @@ class PortkeyLLMService(CompletionService):
             provider = self.current_provider
             
             # Auto-detect provider based on model name
-            if "claude" in model:
-                provider = "anthropic"
+            if "gpt" in model:
+                provider = "openai"
+            # elif "claude" in model:
+            #     provider = "anthropic"
             elif "gemini" in model:
                 provider = "gemini"
-            elif "gpt" in model:
-                provider = "openai"
+            elif "anthropic" in model:
+                provider = "bedrock"
             
             # Get the appropriate virtual key for the provider
             virtual_key = self.provider_keys.get(provider, self.current_virtual_key)
@@ -153,7 +156,7 @@ class PortkeyLLMService(CompletionService):
             self.current_virtual_key = virtual_key
             
             # Use instructor for structured responses
-            if provider == "openai" or provider == "gemini":
+            if provider == "openai" or provider == "gemini" or provider == "bedrock":
                 # Create an OpenAI client that points to Portkey's API
                 openai_client = OpenAI(
                     api_key=self.settings.openai_api_key,
@@ -191,7 +194,7 @@ class PortkeyLLMService(CompletionService):
                     timeout=DEFAULT_TIMEOUT,
                     max_tokens=8000,
                 ) 
-                return response      
+                return response
             else: # other providers
                 # Use Portkey's beta chat completions API
                 response = portkey_client.beta.chat.completions.parse(

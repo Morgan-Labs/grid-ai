@@ -62,12 +62,14 @@ def configure_llm_service(
     
     # Auto-detect provider from model name if not provided
     if not provider:
-        if "claude" in model.lower():
-            provider = "anthropic"
+        if "gpt" in model.lower():
+            provider = "openai"
+        # elif "claude" in model.lower():
+        #     provider = "anthropic"
         elif "gemini" in model.lower():
             provider = "gemini"
-        elif "gpt" in model.lower():
-            provider = "openai"
+        elif "anthropic" in model.lower():
+            provider = "bedrock"
         else:
             provider = "openai"  # Default to OpenAI
     
@@ -75,7 +77,8 @@ def configure_llm_service(
     provider_keys = {
         "anthropic": "anthropic-a27fda",
         "gemini": "gemini-3161fc", 
-        "openai": "openai-6a3e17"
+        "openai": "openai-6a3e17",
+        "bedrock": "bedrock-77eded"
     }
     
     virtual_key = provider_keys.get(provider)

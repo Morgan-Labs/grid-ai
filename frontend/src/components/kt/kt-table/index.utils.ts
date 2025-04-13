@@ -82,7 +82,7 @@ export const handleContextMenu: Required<ReactGridProps>["onContextMenu"] = (
         {
           id: "ingest-sfid-cells",
           // Revert plur cast, use original cells.length
-          label: `Ingest ${plur("Document", cells.length)} (SFID)`, 
+          label: `Ingest ${plur("Document", cells.length)}`, 
           handler: async () => {
             // Get full cell details only when the handler is invoked
             const cellsToProcess = cells.map(loc => {
