@@ -127,7 +127,7 @@ export interface AnswerTableColumn {
   width: number;
   hidden: boolean;
   entityType: string;
-  type: "int" | "str" | "bool" | "int_array" | "str_array";
+  type: "int" | "str" | "bool" | "int_array" | "str_array" | "url";
   generate: boolean;
   query: string;
   rules: AnswerTableRule[];

@@ -176,6 +176,17 @@ function Content({
                 }
               />
             );
+          case "url":
+            return (
+              <Textarea
+                {...inputProps}
+                autosize
+                maxRows={6}
+                variant="unstyled"
+                defaultValue={castToString(cell) ?? undefined}
+                onChange={e => handleChange(e.target.value)}
+              />
+            );
           default:
             return null;
         }

@@ -5,6 +5,7 @@ import {
   IconAlignJustified,
   IconCheckbox,
   IconHash,
+  IconLink,
   TablerIcon,
 } from "@tabler/icons-react";
 import { AnswerTableColumn } from "@config/store";
@@ -18,7 +19,8 @@ export const typeOptions: {
   { value: "str_array", label: "List of text", icon: IconAlignJustified },
   { value: "int", label: "Number", icon: IconHash },
   { value: "int_array", label: "List of numbers", icon: IconHash },
-  { value: "bool", label: "True / False", icon: IconCheckbox }
+  { value: "bool", label: "True / False", icon: IconCheckbox },
+  { value: "url", label: "URL / Hyperlink", icon: IconLink }
 ];
 
 export const generateOptions: {

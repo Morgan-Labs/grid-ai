@@ -173,6 +173,8 @@ export function castToType(
         return castToIntArray(value);
       case "str_array":
         return castToStrArray(value);
+      case "url":
+        return castToString(value); // URLs are stored as strings
       default:
         return value;
     }
