@@ -1,4 +1,4 @@
-import { HTMLAttributes, ReactNode, RefObject, useEffect, useRef } from "react";
+import React, { HTMLAttributes, ReactNode, RefObject, useEffect, useRef } from "react";
 import { Uncertain } from "@silevis/reactgrid";
 import { Text, Badge, Box } from "@mantine/core";
 import { isArray, isBoolean } from "lodash-es";
@@ -24,61 +24,109 @@ function containsUrl(text: string): boolean {
   return URL_REGEX.test(text) || SF_URL_REGEX.test(text);
 }
 
-// Function to render a hyperlink from text
-function renderHyperlink(text: string): ReactNode {
-  // Reset the regex lastIndex property to ensure consistent behavior
-  URL_REGEX.lastIndex = 0;
-  SF_URL_REGEX.lastIndex = 0;
-  
+// Function to create a clickable link component
+function createLinkComponent(url: string, displayText: string): ReactNode {
+  const fullUrl = url.startsWith('http') ? url : `https://${url}`;
+  return (
+    <Text 
+      component="span"
+      style={{ color: '#228be6', cursor: 'pointer', textDecoration: 'underline' }}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation(); // Prevent cell selection
+        window.open(fullUrl, '_blank', 'noopener,noreferrer'); // Manually open in new tab
+      }}
+    >
+      {displayText}
+    </Text>
+  );
+}
+
+// Function to render text with embedded hyperlinks
+function renderTextWithLinks(text: string): ReactNode {
+  if (!text || typeof text !== 'string') {
+    return text;
+  }
+
   try {
-    // First check for Salesforce-specific URLs
-    if (SF_URL_REGEX.test(text)) {
-      SF_URL_REGEX.lastIndex = 0; // Reset for the next search
-      const match = SF_URL_REGEX.exec(text)?.[0];
-      if (match) {
-        return (
-          <Text 
-            style={{ color: '#228be6', cursor: 'pointer', textDecoration: 'underline' }}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation(); // Prevent cell selection
-              window.open(match, '_blank', 'noopener,noreferrer'); // Manually open in new tab
-            }}
-          >
-            View Matter
-          </Text>
-        );
+    // Check for Salesforce URLs
+    SF_URL_REGEX.lastIndex = 0;
+    let sfMatch = SF_URL_REGEX.exec(text);
+    if (sfMatch) {
+      const parts = [];
+      let lastIndex = 0;
+      
+      while (sfMatch) {
+        // Add text before the match
+        if (sfMatch.index > lastIndex) {
+          parts.push(text.substring(lastIndex, sfMatch.index));
+        }
+        
+        // Add the link component
+        parts.push(createLinkComponent(sfMatch[0], 'View URL'));
+        
+        lastIndex = sfMatch.index + sfMatch[0].length;
+        SF_URL_REGEX.lastIndex = lastIndex;
+        sfMatch = SF_URL_REGEX.exec(text);
       }
+      
+      // Add any remaining text
+      if (lastIndex < text.length) {
+        parts.push(text.substring(lastIndex));
+      }
+      
+      // Return the array of text and link components
+      return (
+        <>
+          {parts.map((part, i) => (
+            <React.Fragment key={i}>{part}</React.Fragment>
+          ))}
+        </>
+      );
     }
     
-    // For standard URLs, check if it's a complete URL that can be rendered as a link
-    URL_REGEX.lastIndex = 0; // Reset for the next search
-    if (URL_REGEX.test(text)) {
-      URL_REGEX.lastIndex = 0; // Reset for the next search
-      const match = URL_REGEX.exec(text)?.[0];
-      if (match) {
-        const url = match.startsWith('http') ? match : `https://${match}`;
-        return (
-          <Text 
-            style={{ color: '#228be6', cursor: 'pointer', textDecoration: 'underline' }}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation(); // Prevent cell selection
-              window.open(url, '_blank', 'noopener,noreferrer'); // Manually open in new tab
-            }}
-          >
-            {match}
-          </Text>
-        );
+    // Check for regular URLs
+    URL_REGEX.lastIndex = 0;
+    let urlMatch = URL_REGEX.exec(text);
+    if (urlMatch) {
+      const parts = [];
+      let lastIndex = 0;
+      
+      while (urlMatch) {
+        // Add text before the match
+        if (urlMatch.index > lastIndex) {
+          parts.push(text.substring(lastIndex, urlMatch.index));
+        }
+        
+        // Add the link component
+        parts.push(createLinkComponent(urlMatch[0], urlMatch[0]));
+        
+        lastIndex = urlMatch.index + urlMatch[0].length;
+        URL_REGEX.lastIndex = lastIndex;
+        urlMatch = URL_REGEX.exec(text);
       }
+      
+      // Add any remaining text
+      if (lastIndex < text.length) {
+        parts.push(text.substring(lastIndex));
+      }
+      
+      // Return the array of text and link components
+      return (
+        <>
+          {parts.map((part, i) => (
+            <React.Fragment key={i}>{part}</React.Fragment>
+          ))}
+        </>
+      );
     }
   } catch (error) {
-    console.error("Error rendering hyperlink:", error);
-    // In case of any error, fall back to plain text
-    return <Text>{text}</Text>;
+    console.error("Error rendering hyperlinks:", error);
+    // In case of error, return the original text
+    return text;
   }
   
-  // If not a URL, return the text as is
+  // No URLs found, return the original text
   return text;
 }
 
@@ -96,7 +144,7 @@ export function formatCell(cell?: CellValue): ReactNode {
     if (typeof cellText === 'string' && containsUrl(cellText)) {
       return (
         <Text lineClamp={2}>
-          {renderHyperlink(cellText)}
+          {renderTextWithLinks(cellText)}
         </Text>
       );
     } else {
