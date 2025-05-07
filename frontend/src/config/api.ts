@@ -118,7 +118,7 @@ export const uploadFile = async (file: File): Promise<any> => {
   
   // Create a controller for timeout
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout for uploads
+  const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minute timeout for uploads
   
   try {
     // Make a preflight OPTIONS request first to ensure CORS is set up
@@ -179,8 +179,8 @@ export const uploadFile = async (file: File): Promise<any> => {
     clearTimeout(timeoutId);
     
     if (error instanceof Error && error.name === 'AbortError') {
-      console.error('Upload timed out after 5 minutes');
-      throw new ApiError('Upload timed out after 5 minutes', 408);
+      console.error('Upload timed out after 10 minutes');
+      throw new ApiError('Upload timed out after 10 minutes', 408);
     }
     
     console.error('Error uploading file:', error);

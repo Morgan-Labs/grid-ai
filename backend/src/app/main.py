@@ -51,11 +51,6 @@ app.add_middleware(
     max_age=3600,  # Cache preflight requests for 60 minutes
 )
 
-# Log the CORS configuration for debugging
-logger.info("CORS configuration:")
-logger.info(f"  Allow origins: {app.user_middleware[0].options['allow_origins']}")
-logger.info(f"  Allow credentials: {app.user_middleware[0].options['allow_credentials']}")
-logger.info(f"  Max age: {app.user_middleware[0].options['max_age']}")
 
 # Add middleware to ensure CORS headers are always present
 class EnsureCORSMiddleware(BaseHTTPMiddleware):
@@ -76,10 +71,6 @@ class EnsureCORSMiddleware(BaseHTTPMiddleware):
             # Get the origin header
             origin = request.headers.get("Origin")
             
-            # Log detailed information about the OPTIONS request for debugging
-            logger.info(f"OPTIONS request received for path: {request.url.path}")
-            logger.info(f"Origin header: {origin}")
-            logger.info(f"Headers: {dict(request.headers)}")
             
             # Create a new response with CORS headers
             response = Response(status_code=200)

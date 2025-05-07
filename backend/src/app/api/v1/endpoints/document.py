@@ -166,6 +166,9 @@ async def upload_document_endpoint(
         read_time = time.time() - start_time
         logger.info(f"File read completed in {read_time:.2f} seconds")
         
+        # Log the file size
+        logger.info(f"Processing file of size: {len(file_content)} bytes")
+        
         # Process document
         process_start = time.time()
         document_id = await document_service.upload_document(
@@ -199,7 +202,7 @@ async def upload_document_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve)
         )
     except Exception as e:
-        logger.error(f"Unexpected error in upload_document_endpoint: {str(e)}")
+        logger.error(f"Unexpected error in upload_document_endpoint: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
@@ -648,10 +651,7 @@ async def options_any_document_endpoint(
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers, DNT, If-Modified-Since, Cache-Control, Range"
-        response.headers["Access-Control-Max-Age"] = "3600"  # Cache preflight for 60 minutes
-    
-    # Log the OPTIONS request to debug
-    logger.info(f"OPTIONS preflight request for document path: {path}")
+        response.headers["Access-Control-Max-Age"] = "3600"  # Cache preflight for 60 minutes    
     
     return {}
 
