@@ -48,8 +48,14 @@ app.add_middleware(
                   "Access-Control-Request-Method", "Access-Control-Request-Headers",
                   "DNT", "If-Modified-Since", "Cache-Control", "Range"],
     expose_headers=["Content-Length", "Content-Range", "Access-Control-Allow-Origin"],
-    max_age=3600,  # Cache preflight requests for 60 minutes (increased from 30)
+    max_age=3600,  # Cache preflight requests for 60 minutes
 )
+
+# Log the CORS configuration for debugging
+logger.info("CORS configuration:")
+logger.info(f"  Allow origins: {app.user_middleware[0].options['allow_origins']}")
+logger.info(f"  Allow credentials: {app.user_middleware[0].options['allow_credentials']}")
+logger.info(f"  Max age: {app.user_middleware[0].options['max_age']}")
 
 # Add middleware to ensure CORS headers are always present
 class EnsureCORSMiddleware(BaseHTTPMiddleware):
@@ -70,6 +76,11 @@ class EnsureCORSMiddleware(BaseHTTPMiddleware):
             # Get the origin header
             origin = request.headers.get("Origin")
             
+            # Log detailed information about the OPTIONS request for debugging
+            logger.info(f"OPTIONS request received for path: {request.url.path}")
+            logger.info(f"Origin header: {origin}")
+            logger.info(f"Headers: {dict(request.headers)}")
+            
             # Create a new response with CORS headers
             response = Response(status_code=200)
             
@@ -81,6 +92,15 @@ class EnsureCORSMiddleware(BaseHTTPMiddleware):
                 response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers, DNT, If-Modified-Since, Cache-Control, Range"
                 response.headers["Access-Control-Max-Age"] = "3600" # 1 hour cache for preflight
             
+            # Special handling for document endpoints that have been problematic
+            if "/api/v1/document/" in request.url.path:
+                logger.info(f"Special handling for document endpoint: {request.url.path}")
+                # Ensure all necessary headers are present for document endpoints
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers, DNT, If-Modified-Since, Cache-Control, Range"
+                
             return response
             
         try:

@@ -629,15 +629,17 @@ async def get_document_text_endpoint(
 
 
 @router.options(
-    "/get-text/{document_id}",
+    "/{path:path}",
     status_code=200,
 )
-async def options_get_document_text_endpoint(
+async def options_any_document_endpoint(
     request: Request,
     response: Response,
+    path: str,
 ):
     """
-    Handle preflight OPTIONS requests for get document text endpoint.
+    Handle preflight OPTIONS requests for any document endpoint.
+    This universal OPTIONS handler will catch all preflight requests for any document paths.
     """
     # Set CORS headers for preflight request
     origin = request.headers.get("Origin")
@@ -645,8 +647,12 @@ async def options_get_document_text_endpoint(
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
-        response.headers["Access-Control-Max-Age"] = "1800"  # Cache preflight for 30 minutes
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers, DNT, If-Modified-Since, Cache-Control, Range"
+        response.headers["Access-Control-Max-Age"] = "3600"  # Cache preflight for 60 minutes
+    
+    # Log the OPTIONS request to debug
+    logger.info(f"OPTIONS preflight request for document path: {path}")
+    
     return {}
 
 
