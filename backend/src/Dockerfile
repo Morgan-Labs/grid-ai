@@ -81,6 +81,10 @@ RUN --mount=type=cache,target=/var/cache/apt \
     tesseract-ocr-eng && \
     rm -rf /var/lib/apt/lists/*
 
+# Install Gunicorn for production server with timeout support
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install gunicorn
+
 # Install the project with all PDF processing dependencies including Textract and GPT-4o
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -e ".[pdf-all]" && \
@@ -104,6 +108,6 @@ USER appuser
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/ping || exit 1
 
-# Run the application
+# Run the application with Gunicorn for better timeout support
 # Use PORT environment variable if set (for Render), otherwise default to 8000
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD gunicorn app.main:app -k uvicorn.workers.UvicornWorker --timeout 1800 --keep-alive 120 --workers 2 --bind 0.0.0.0:${PORT:-8000}
