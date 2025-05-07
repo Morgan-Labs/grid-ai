@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     embedding_provider: str = "openai"
     embedding_model: str = "text-embedding-3-small"
     llm_provider: str = "portkey"  # Options: openai, anthropic, gemini
-    llm_model: str = "gpt-4o"  # Model name depends on the provider
+    llm_model: str = "gpt-4.1"
     llm_virtual_key: Optional[str] = None  # Portkey virtual key for the selected provider/model
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None  # API key for Anthropic models

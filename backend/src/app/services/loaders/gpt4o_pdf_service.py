@@ -205,7 +205,7 @@ class GPT4OPDFLoader(LoaderService):
             # Create a ChatOpenAI model with the API key
             chat_model = ChatOpenAI(
                 api_key=self.openai_api_key,
-                model="gpt-4o",
+                model="gpt-4.1",
                 max_tokens=1024,
                 temperature=0
             )

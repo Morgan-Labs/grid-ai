@@ -41,6 +41,7 @@ export interface LLMOption {
 
 export const llmOptions: LLMOption[] = [
   // OpenAI models
+  { provider: "openai", model: "gpt-4.1", label: "GPT-4.1" },
   { provider: "openai", model: "gpt-4o", label: "GPT-4o" },
   { provider: "openai", model: "gpt-4o-mini", label: "GPT-4o Mini" },
   { provider: "openai", model: "gpt-4-turbo", label: "GPT-4 Turbo" },
