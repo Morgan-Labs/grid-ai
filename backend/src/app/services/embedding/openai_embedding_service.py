@@ -40,7 +40,7 @@ class OpenAIEmbeddingService(EmbeddingService):
         # Maximum number of texts to send in one batch
         # Assuming max ~2000 tokens per text chunk for safety
         # OpenAI has a 300K token limit, so 100 chunks should be safe
-        batch_size = 50
+        batch_size = 100
 
         # Log summary info only
         logger.info(f"Processing {len(texts)} text chunks in batches of {batch_size}")

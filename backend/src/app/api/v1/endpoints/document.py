@@ -142,13 +142,16 @@ async def upload_document_endpoint(
     HTTPException
         If the file name is missing or if an error occurs during processing.
     """
-    # Ensure CORS headers are present
+    # Ensure CORS headers are present with additional debug information
     origin = request.headers.get("Origin")
+    # Add Vary header to help with caching
+    response.headers["Vary"] = "Origin"
+    
     if origin:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers, DNT, If-Modified-Since, Cache-Control, Range"
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -600,8 +603,11 @@ async def get_document_text_endpoint(
     HTTPException
         If the document text cannot be fetched.
     """
-    # Ensure CORS headers are present
     origin = request.headers.get("Origin")
+    
+    # Add Vary header to help with caching
+    response.headers["Vary"] = "Origin"
+    
     if origin:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"

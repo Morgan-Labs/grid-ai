@@ -83,14 +83,14 @@ class EnsureCORSMiddleware(BaseHTTPMiddleware):
                 response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers, DNT, If-Modified-Since, Cache-Control, Range"
                 response.headers["Access-Control-Max-Age"] = "3600" # 1 hour cache for preflight
             
-            # Special handling for document endpoints that have been problematic
-            if "/api/v1/document/" in request.url.path:
+            if "/api/v1/document" in request.url.path:
                 logger.info(f"Special handling for document endpoint: {request.url.path}")
                 # Ensure all necessary headers are present for document endpoints
-                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Origin"] = origin if origin else "*"
                 response.headers["Access-Control-Allow-Credentials"] = "true"
                 response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
                 response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers, DNT, If-Modified-Since, Cache-Control, Range"
+                response.headers["Vary"] = "Origin"
                 
             return response
             
@@ -108,6 +108,10 @@ class EnsureCORSMiddleware(BaseHTTPMiddleware):
                 # Add these headers for non-OPTIONS requests too
                 response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
                 response.headers["Access-Control-Expose-Headers"] = "Content-Length, Content-Range, Access-Control-Allow-Origin"
+                
+                # Special handling for document endpoints in regular requests too
+                if "/api/v1/document" in request.url.path:
+                    response.headers["Vary"] = "Origin"
             
             return response
         except RuntimeError as e:

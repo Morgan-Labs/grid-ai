@@ -101,8 +101,8 @@ class Settings(BaseSettings):
 
     # DOCUMENT PROCESSING CONFIG
     loader: str = "pypdf"
-    chunk_size: int = 512
-    chunk_overlap: int = 64
+    chunk_size: int = 1024
+    chunk_overlap: int = 256
 
     # UNSTRUCTURED CONFIG
     unstructured_api_key: Optional[str] = None
