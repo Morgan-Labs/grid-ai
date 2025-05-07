@@ -110,4 +110,5 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 
 # Run the application with Gunicorn for better timeout support
 # Use PORT environment variable if set (for Render), otherwise default to 8000
-CMD gunicorn app.main:app -k uvicorn.workers.UvicornWorker --timeout 1800 --keep-alive 120 --workers 2 --bind 0.0.0.0:${PORT:-8000}
+# Using single worker to prevent database locking issues with Milvus
+CMD gunicorn app.main:app -k uvicorn.workers.UvicornWorker --timeout 1800 --keep-alive 120 --workers 1 --bind 0.0.0.0:${PORT:-8000}
