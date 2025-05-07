@@ -48,7 +48,7 @@ app.add_middleware(
                   "Access-Control-Request-Method", "Access-Control-Request-Headers",
                   "DNT", "If-Modified-Since", "Cache-Control", "Range"],
     expose_headers=["Content-Length", "Content-Range", "Access-Control-Allow-Origin"],
-    max_age=1800,  # Cache preflight requests for 30 minutes (increased from 10)
+    max_age=3600,  # Cache preflight requests for 60 minutes (increased from 30)
 )
 
 # Add middleware to ensure CORS headers are always present
@@ -65,22 +65,38 @@ class EnsureCORSMiddleware(BaseHTTPMiddleware):
         Returns:
             Response: The response with CORS headers.
         """
+        # Special handling for OPTIONS requests (preflight)
+        if request.method == "OPTIONS":
+            # Get the origin header
+            origin = request.headers.get("Origin")
+            
+            # Create a new response with CORS headers
+            response = Response(status_code=200)
+            
+            # Set CORS headers - be permissive for OPTIONS requests
+            if origin:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers, DNT, If-Modified-Since, Cache-Control, Range"
+                response.headers["Access-Control-Max-Age"] = "3600" # 1 hour cache for preflight
+            
+            return response
+            
         try:
-            # Process the request and get the response
+            # Process non-OPTIONS requests and get the response
             response = await call_next(request)
             
-            # Ensure CORS headers are present
+            # Ensure CORS headers are present for all responses
             origin = request.headers.get("Origin")
             if origin:
                 # Only set specific origin, not wildcard, when credentials are used
                 response.headers["Access-Control-Allow-Origin"] = origin
                 response.headers["Access-Control-Allow-Credentials"] = "true"
-            
-            # For preflight requests
-            if request.method == "OPTIONS":
+                
+                # Add these headers for non-OPTIONS requests too
                 response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
-                response.headers["Access-Control-Max-Age"] = "1800"
+                response.headers["Access-Control-Expose-Headers"] = "Content-Length, Content-Range, Access-Control-Allow-Origin"
             
             return response
         except RuntimeError as e:
@@ -92,8 +108,8 @@ class EnsureCORSMiddleware(BaseHTTPMiddleware):
                 if origin:
                     response.headers["Access-Control-Allow-Origin"] = origin
                     response.headers["Access-Control-Allow-Credentials"] = "true"
-                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+                    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+                    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
                 return response
             else:
                 # Re-raise other runtime errors

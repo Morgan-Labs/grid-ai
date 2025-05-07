@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from app.core.dependencies import get_llm_service
 from app.models.document import Document
@@ -25,11 +25,42 @@ router = APIRouter(tags=["Graph"])
 logger = logging.getLogger(__name__)
 
 
+@router.options(
+    "/export-triples",
+    status_code=200,
+)
+async def options_export_triples_endpoint(
+    request: Request,
+    response: Response,
+):
+    """
+    Handle preflight OPTIONS requests for export triples endpoint.
+    """
+    # Set CORS headers for preflight request
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+        response.headers["Access-Control-Max-Age"] = "1800"  # Cache preflight for 30 minutes
+    return {}
+
+
 @router.post("/export-triples", response_model=ExportTriplesResponseSchema)
 async def export_triples(
     request: ExportTriplesRequestSchema,
+    req: Request,
+    resp: Response,
     llm_service: CompletionService = Depends(get_llm_service),
 ) -> ExportTriplesResponseSchema:
+    # Ensure CORS headers are present
+    origin = req.headers.get("Origin")
+    if origin:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     """
     Generate and export triples from a table.
 

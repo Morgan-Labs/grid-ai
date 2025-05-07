@@ -33,6 +33,72 @@ router = APIRouter(tags=["query"])
 logger.info("Query router initialized")
 
 
+@router.options(
+    "",
+    status_code=200,
+)
+async def options_query_endpoint(
+    request: Request,
+    response: Response,
+):
+    """
+    Handle preflight OPTIONS requests for query endpoint.
+    """
+    # Set CORS headers for preflight request
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+        response.headers["Access-Control-Max-Age"] = "1800"  # Cache preflight for 30 minutes
+    return {}
+
+
+@router.options(
+    "/batch",
+    status_code=200,
+)
+async def options_batch_query_endpoint(
+    request: Request,
+    response: Response,
+):
+    """
+    Handle preflight OPTIONS requests for batch query endpoint.
+    """
+    # Set CORS headers for preflight request
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+        response.headers["Access-Control-Max-Age"] = "1800"  # Cache preflight for 30 minutes
+    return {}
+
+
+@router.options(
+    "/test-error",
+    status_code=200,
+)
+async def options_test_error_endpoint(
+    request: Request,
+    response: Response,
+):
+    """
+    Handle preflight OPTIONS requests for test error endpoint.
+    """
+    # Set CORS headers for preflight request
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+        response.headers["Access-Control-Max-Age"] = "1800"  # Cache preflight for 30 minutes
+    return {}
+
+
 def configure_llm_service(
     llm_service: CompletionService, 
     settings: Settings,
@@ -127,10 +193,19 @@ def configure_llm_service(
 @router.post("", response_model=QueryAnswerResponse)
 async def run_query(
     request: QueryRequestSchema,
+    req: Request,
+    resp: Response,
     llm_service: CompletionService = Depends(get_llm_service),
     vector_db_service: VectorDBService = Depends(get_vector_db_service),
     settings: Settings = Depends(get_settings),
 ) -> QueryAnswerResponse:
+    # Ensure CORS headers are present
+    origin = req.headers.get("Origin")
+    if origin:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     """
     Run a query and generate a response.
 
@@ -529,7 +604,18 @@ def create_fallback_response(req: QueryRequestSchema) -> QueryAnswerResponse:
 
 
 @router.get("/test-error", response_model=Dict[str, Any])
-async def test_error(error_type: str = "timeout") -> Dict[str, Any]:
+async def test_error(
+    request: Request,
+    response: Response,
+    error_type: str = "timeout"
+) -> Dict[str, Any]:
+    # Ensure CORS headers are present
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     """
     Test endpoint to simulate different types of errors.
     
