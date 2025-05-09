@@ -15,6 +15,8 @@ export interface Store {
   documentPreviews: Record<string, string[]>; // Store document preview content by document ID
   auth: AuthState;
   _saveTableStateTimer: ReturnType<typeof setTimeout> | null; // Timer for debouncing table state saves
+  isLoading: boolean;
+  savedStates: TableStateListItem[]; // Added: To store the list of fetched states
 
   toggleColorScheme: () => void;
   setActivePopover: (id: string | null) => void;
@@ -82,12 +84,11 @@ export interface Store {
   
   // Table state persistence
   saveTableState: () => Promise<void>;
-  loadLatestTableState: () => Promise<void>;
+  loadSavedStatesAndActivateLatest: () => Promise<void>; // Added
+  loadTableState: (tableId: string) => Promise<void>; // Added
+  setTableData: (tableId: string, fullTableDataContainer: { name?: string, data: Omit<AnswerTable, 'id' | 'name'> }) => void; // Added
   
   clear: (allTables?: boolean) => void;
-
-  // Loading state
-  isLoading: boolean;
 }
 
 export interface ResolvedEntity {
@@ -180,3 +181,55 @@ export type CellKey = `${string}-${string}`;
 export type Document = z.infer<typeof documentSchema>;
 export type CellValue = z.infer<typeof answerSchema> | undefined;
 export type Chunk = z.infer<typeof chunkSchema>;
+
+// --- ADD API-SPECIFIC TABLE STATE TYPES ---
+
+// For the items in the list returned by GET /table-state/
+export interface TableStateListItem {
+  id: string;
+  name: string;
+  created_at: string; // Or Date, if you parse it
+  updated_at: string; // Or Date
+  user_id?: string; // Optional, if your backend provides it
+}
+
+// For the overall response of GET /table-state/
+export interface TableStateListResponse {
+  items: TableStateListItem[];
+  // include other pagination fields if your API supports them e.g.
+  // total?: number;
+  // page?: number;
+  // size?: number;
+}
+
+// For the response of GET /table-state/{id} (a single full table state)
+// Also generally represents the TableState model on the backend.
+export interface TableState {
+  id: string;
+  name: string;
+  // The 'data' field contains the actual table structure, similar to AnswerTable.
+  // For simplicity, we can say 'data' IS an AnswerTable, but without its own id/name if those are redundant
+  // with the outer TableState id/name.
+  // However, your backend TableState.data might have a structure identical to AnswerTable including id/name.
+  // Let's assume backend's TableState.data *is* the AnswerTable structure for now.
+  data: AnswerTable; 
+  created_at: string; // Or Date
+  updated_at: string; // Or Date
+  user_id?: string; // Optional
+}
+
+// Type alias for clarity, as GET /table-state/{id} returns a TableState object
+export type TableStateResponse = TableState;
+
+// For the payload of POST /table-state/
+export interface TableStateCreate {
+  id: string;       // Usually CUID generated on frontend
+  name: string;
+  data: AnswerTable; // The full table data structure
+}
+
+// For the payload of PUT /table-state/{id}
+export interface TableStateUpdate {
+  name?: string;      // Optional: only if name is being changed
+  data?: Partial<AnswerTable>; // Optional: allow partial or full update of the data field
+}

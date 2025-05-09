@@ -22,28 +22,16 @@ import {
   IconWand,
   IconClock
 } from "@tabler/icons-react";
-import { AnswerTable, useStore } from "@config/store";
+import { AnswerTable, useStore, TableStateListItem } from "@config/store";
 import { useDerivedState } from "@hooks";
-import { listTableStates, TableState } from "../../services/api/table-state";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 export function KtSwitch(props: BoxProps) {
-  const table = useStore(store => store.getTable());
-  const tables = useStore(store => store.tables);
-  const [tableStates, setTableStates] = useState<TableState[]>([]);
+  const activeTable = useStore(store => store.getTable());
+  const savedStates = useStore(store => store.savedStates || []);
+  const loadTableState = useStore(store => store.loadTableState);
+  const allTablesFromStore = useStore(store => store.tables);
   const [sortByUpdated, setSortByUpdated] = useState(true);
-
-  useEffect(() => {
-    const fetchTableStates = async () => {
-      try {
-        const response = await listTableStates();
-        setTableStates(response.items);
-      } catch (error) {
-        console.error('Failed to fetch table states:', error);
-      }
-    };
-    fetchTableStates();
-  }, []);
 
   const handleNewTable = () => {
     modals.open({
@@ -54,53 +42,45 @@ export function KtSwitch(props: BoxProps) {
   };
 
   const handleRename = () => {
+    if (!activeTable) return;
     modals.open({
       size: "xs",
       title: "Rename table",
-      children: <RenameTableModalContent table={table} />
+      children: <RenameTableModalContent table={activeTable} />
     });
   };
 
   const handleDelete = () => {
+    if (!activeTable) return;
     modals.openConfirmModal({
       title: "Delete table",
       children: (
         <Text>
-          Are you sure you want to delete this table and all its data?
+          Are you sure you want to delete table '{activeTable.name}'?
         </Text>
       ),
       labels: { confirm: "Confirm", cancel: "Cancel" },
-      onConfirm: () => useStore.getState().deleteTable(table.id)
+      onConfirm: () => useStore.getState().deleteTable(activeTable.id)
     });
   };
 
-  const getLastUpdated = (tableId: string) => {
-    const tableState = tableStates.find(state => state.id === tableId);
-    if (!tableState) return null;
-    const date = new Date(tableState.updated_at + 'Z');
-    return {
-      short: date.toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      }),
-      full: date.toLocaleString('en-US', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZoneName: 'short'
-      })
-    };
+  const formatTimestamp = (isoString: string) => {
+    if (!isoString) return null;
+    try {
+        const date = new Date(isoString + 'Z');
+        return {
+          short: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          full: date.toLocaleString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' })
+        };
+    } catch (e) {
+        console.error("Error parsing date:", isoString, e);
+        return null;
+    }
   };
 
-  const sortedTables = [...tables].sort((a, b) => {
+  const sortedSavedStates = [...savedStates].sort((a, b) => {
     if (sortByUpdated) {
-      const aUpdated = tableStates.find(state => state.id === a.id)?.updated_at;
-      const bUpdated = tableStates.find(state => state.id === b.id)?.updated_at;
-      if (!aUpdated || !bUpdated) return 0;
-      return new Date(bUpdated).getTime() - new Date(aUpdated).getTime();
+      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
     } else {
       return a.name.localeCompare(b.name);
     }
@@ -115,8 +95,9 @@ export function KtSwitch(props: BoxProps) {
               variant="light" 
               rightSection={<IconChevronDown size={16} />}
               leftSection={<IconTable size={16} />}
+              disabled={!activeTable}
             >
-              {table.name}
+              {activeTable ? activeTable.name : "Loading..."}
             </Button>
           </Menu.Target>
           <Menu.Dropdown>
@@ -124,26 +105,24 @@ export function KtSwitch(props: BoxProps) {
               <Group justify="space-between">
                 <Text>Tables</Text>
                 <Tooltip label={sortByUpdated ? "Sort by name" : "Sort by last updated"}>
-                  <ActionIcon 
-                    variant="subtle" 
-                    onClick={() => setSortByUpdated(!sortByUpdated)}
-                    color={sortByUpdated ? "blue" : "gray"}
-                  >
+                  <ActionIcon variant="subtle" onClick={() => setSortByUpdated(!sortByUpdated)} color={sortByUpdated ? "blue" : "gray"}>
                     <IconClock size={16} />
                   </ActionIcon>
                 </Tooltip>
               </Group>
             </Menu.Label>
-            {sortedTables.map(t => {
-              const lastUpdated = getLastUpdated(t.id);
+            {sortedSavedStates.map(stateItem => {
+              const lastUpdated = formatTimestamp(stateItem.updated_at);
+              const isActive = activeTable?.id === stateItem.id;
               return (
                 <Menu.Item
-                  key={t.id}
+                  key={stateItem.id}
                   leftSection={<IconTable size={16} />}
-                  onClick={() => useStore.getState().switchTable(t.id)}
+                  onClick={() => !isActive && loadTableState(stateItem.id)}
+                  fw={isActive ? 700 : 'normal'}
                   rightSection={
                     <Stack gap={0} align="end">
-                      {t.id === table.id && <Badge size="xs" variant="light">Active</Badge>}
+                      {isActive && <Badge size="xs" variant="light">Active</Badge>}
                       {lastUpdated && (
                         <Tooltip label={lastUpdated.full}>
                           <Text size="xs" c="dimmed">
@@ -154,7 +133,7 @@ export function KtSwitch(props: BoxProps) {
                     </Stack>
                   }
                 >
-                  {t.name}
+                  {stateItem.name}
                 </Menu.Item>
               );
             })}
@@ -171,13 +150,13 @@ export function KtSwitch(props: BoxProps) {
         
         <Group gap={4}>
           <Tooltip label="Rename table">
-            <ActionIcon variant="subtle" onClick={handleRename} size="md">
+            <ActionIcon variant="subtle" onClick={handleRename} size="md" disabled={!activeTable}>
               <IconPencil size={16} />
             </ActionIcon>
           </Tooltip>
-          {tables.length > 1 && (
+          {allTablesFromStore.length > 1 && (
             <Tooltip label="Delete table">
-              <ActionIcon variant="subtle" color="red" onClick={handleDelete} size="md">
+              <ActionIcon variant="subtle" color="red" onClick={handleDelete} size="md" disabled={!activeTable}>
                 <IconTrash size={16} />
               </ActionIcon>
             </Tooltip>
@@ -194,7 +173,6 @@ function NewTableModalContent() {
   const tables = useStore(store => store.tables);
   
   const handleCreate = () => {
-    // Check if a table with this name already exists
     const nameExists = tables.some(t => t.name.toLowerCase() === name.trim().toLowerCase());
     
     if (nameExists) {
@@ -206,7 +184,6 @@ function NewTableModalContent() {
     modals.closeAll();
   };
 
-  // Clear error when name changes
   const handleNameChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setName(event.currentTarget.value);
     if (error) setError("");
@@ -243,7 +220,6 @@ function RenameTableModalContent({ table }: { table: AnswerTable }) {
   const tables = useStore(store => store.tables);
   
   const handleSave = () => {
-    // Check if a table with this name already exists (excluding the current table)
     const nameExists = tables.some(t => 
       t.id !== table.id && 
       t.name.toLowerCase() === name.trim().toLowerCase()
@@ -258,7 +234,6 @@ function RenameTableModalContent({ table }: { table: AnswerTable }) {
     modals.closeAll();
   };
   
-  // Clear error when name changes
   const handleNameChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     handlers.set(event.currentTarget.value);
     if (error) setError("");

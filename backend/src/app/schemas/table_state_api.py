@@ -31,7 +31,18 @@ class TableStateResponse(BaseModel):
     updated_at: datetime
 
 
+class TableStateListItem(BaseModel):
+    """Schema for table state list item (without full data)."""
+    id: str
+    name: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class TableStateListResponse(BaseModel):
     """Schema for listing table states."""
     
-    items: List[TableStateResponse]
+    items: List[TableStateListItem]

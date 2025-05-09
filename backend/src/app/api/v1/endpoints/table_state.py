@@ -26,49 +26,6 @@ settings = get_settings()
 # Create router
 router = APIRouter()
 
-@router.options(
-    "/",
-    status_code=200,
-)
-async def options_table_state_endpoint(
-    request: Request,
-    response: Response,
-):
-    """
-    Handle preflight OPTIONS requests for table state operations.
-    """
-    # Set CORS headers for preflight request
-    origin = request.headers.get("Origin")
-    if origin:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
-        response.headers["Access-Control-Max-Age"] = "3600"  # Cache preflight for 60 minutes
-    return {}
-
-@router.options(
-    "/{table_id}",
-    status_code=200,
-)
-async def options_table_state_by_id_endpoint(
-    request: Request,
-    response: Response,
-):
-    """
-    Handle preflight OPTIONS requests for specific table state operations.
-    """
-    # Set CORS headers for preflight request
-    origin = request.headers.get("Origin")
-    if origin:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
-        response.headers["Access-Control-Max-Age"] = "3600"  # Cache preflight for 60 minutes
-    return {}
-
-
 @router.post(
     "/",
     response_model=TableStateResponse,
@@ -77,21 +34,13 @@ async def options_table_state_by_id_endpoint(
     description="Create a new table state with the provided data.",
 )
 async def create_table_state(
-    request: Request,
     response: Response,
     table_state_create: TableStateCreate,
     _: dict = Depends(jwt_auth),
 ) -> TableStateResponse:
-    # Ensure CORS headers are present
-    origin = request.headers.get("Origin")
-    if origin:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     """Create a new table state."""
     # Check if a table state with the same ID already exists
-    existing_table_state = TableStateService.get_table_state(table_state_create.id)
+    existing_table_state = await TableStateService.get_table_state(table_state_create.id)
     if existing_table_state:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -106,7 +55,7 @@ async def create_table_state(
     )
     
     # Save the table state
-    saved_table_state = TableStateService.save_table_state(table_state)
+    saved_table_state = await TableStateService.save_table_state(table_state)
     
     return TableStateResponse(
         id=saved_table_state.id,
@@ -125,32 +74,15 @@ async def create_table_state(
     description="List all table states.",
 )
 async def list_table_states(
-    request: Request,
     response: Response,
     _: dict = Depends(jwt_auth),
 ) -> TableStateListResponse:
-    # Ensure CORS headers are present
-    origin = request.headers.get("Origin")
-    if origin:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     """List all table states."""
-    table_states = TableStateService.list_table_states()
+    # Service now returns List[Dict[str, Any]] with essential fields
+    table_states_list_of_dicts = await TableStateService.list_table_states()
     
-    return TableStateListResponse(
-        items=[
-            TableStateResponse(
-                id=table_state.id,
-                name=table_state.name,
-                data=table_state.data,
-                created_at=table_state.created_at,
-                updated_at=table_state.updated_at,
-            )
-            for table_state in table_states
-        ]
-    )
+    # Pass the list of dicts directly; Pydantic will validate against TableStateListItem
+    return TableStateListResponse(items=table_states_list_of_dicts)
 
 
 @router.get(
@@ -161,20 +93,12 @@ async def list_table_states(
     description="Get a table state by ID.",
 )
 async def get_table_state(
-    request: Request,
     response: Response,
     table_id: str = Path(..., description="The ID of the table state to get"),
     _: dict = Depends(jwt_auth),
 ) -> TableStateResponse:
-    # Ensure CORS headers are present
-    origin = request.headers.get("Origin")
-    if origin:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     """Get a table state by ID."""
-    table_state = TableStateService.get_table_state(table_id)
+    table_state = await TableStateService.get_table_state(table_id)
     
     if not table_state:
         raise HTTPException(
@@ -199,22 +123,14 @@ async def get_table_state(
     description="Update a table state by ID.",
 )
 async def update_table_state(
-    request: Request,
     response: Response,
     table_state_update: TableStateUpdate,
     table_id: str = Path(..., description="The ID of the table state to update"),
     _: dict = Depends(jwt_auth),
 ) -> TableStateResponse:
-    # Ensure CORS headers are present
-    origin = request.headers.get("Origin")
-    if origin:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     """Update a table state by ID."""
     # Get the existing table state
-    existing_table_state = TableStateService.get_table_state(table_id)
+    existing_table_state = await TableStateService.get_table_state(table_id)
     
     if not existing_table_state:
         raise HTTPException(
@@ -230,7 +146,7 @@ async def update_table_state(
         existing_table_state.data = table_state_update.data
     
     # Save the updated table state
-    updated_table_state = TableStateService.save_table_state(existing_table_state)
+    updated_table_state = await TableStateService.save_table_state(existing_table_state)
     
     return TableStateResponse(
         id=updated_table_state.id,
@@ -248,21 +164,13 @@ async def update_table_state(
     description="Delete a table state by ID.",
 )
 async def delete_table_state(
-    request: Request,
     response: Response,
     table_id: str = Path(..., description="The ID of the table state to delete"),
     _: dict = Depends(jwt_auth),
 ) -> None:
-    # Ensure CORS headers are present
-    origin = request.headers.get("Origin")
-    if origin:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     """Delete a table state by ID."""
     # Delete the table state
-    deleted = TableStateService.delete_table_state(table_id)
+    deleted = await TableStateService.delete_table_state(table_id)
     
     if not deleted:
         raise HTTPException(

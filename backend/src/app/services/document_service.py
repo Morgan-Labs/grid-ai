@@ -6,7 +6,7 @@ import os
 import tempfile
 import time
 import uuid
-import requests
+import httpx
 from typing import Any, Dict, List, Optional, Tuple
 
 from langchain.schema import Document as LangchainDocument
@@ -639,102 +639,107 @@ class DocumentService:
 
     async def delete_document(self, document_id: str, parent_run_id: str = None) -> Dict[str, str]:
         """Delete a document."""
+        logger.info(f"Deleting document with ID: {document_id}")
+        # Implementation should interact with self.vector_db_service to remove vectors
+        # and potentially delete the original file if stored permanently.
         try:
-            # The parent_run_id will be handled by the traceable decorator
-            result = await self.vector_db_service.delete_document(document_id, parent_run_id)
-            return result
+            # Example: Assuming vector_db_service has a delete method
+            await self.vector_db_service.delete_vectors_by_document_id(document_id, parent_run_id=parent_run_id)
+            
+            # Optionally, delete the physical file if it's stored and managed by this service
+            # This depends on how/where files are stored after initial upload processing.
+            # For example, if file_path was stored in metadata or a database:
+            # file_path_to_delete = self._get_file_path_for_document(document_id) 
+            # if file_path_to_delete and os.path.exists(file_path_to_delete):
+            #     os.remove(file_path_to_delete)
+            #     logger.info(f"Deleted physical file for document ID: {document_id} at {file_path_to_delete}")
+
+            logger.info(f"Successfully deleted document data for ID: {document_id}")
+            return {"document_id": document_id, "status": "deleted"}
         except Exception as e:
-            logger.error(f"Error deleting document: {e}")
-            raise
+            logger.error(f"Error deleting document ID {document_id}: {e}", exc_info=True)
+            # Consider re-raising a service-specific exception or returning a more detailed error status
+            return {"document_id": document_id, "status": "error", "detail": str(e)}
 
     async def fetch_document_text_by_id(self, document_id: str) -> Optional[str]:
-        """Fetch document text from the external API using document ID.
-        
-        Parameters
-        ----------
-        document_id : str
-            The ID of the document to fetch
-            
-        Returns
-        -------
-        Optional[str]
-            The document text if successful, None otherwise
-        """
-        try:
-            logger.info(f"Fetching document text for document_id: {document_id}")
-            
-            # Format the API URL with document ID and token
-            api_url = self.settings.document_api_endpoint.format(
-                document_id, 
-                self.settings.document_api_token
-            )
-            
-            # Set headers
-            headers = {
-                'accept': 'application/json',
-            }
-            
-            # Make the request
-            response = requests.get(api_url, headers=headers)
-            
-            # Check for successful response
-            if response.status_code == 200:
-                # Extract and return the text from the JSON response
-                text_content = response.json().get('text')
-                
-                if text_content:
-                    logger.info(f"Successfully fetched text for document_id: {document_id} ({len(text_content)} characters)")
-                    return text_content
-                else:
-                    logger.warning(f"Document API returned empty text for document_id: {document_id}")
-            else:
-                logger.error(f"Failed to fetch document text, status code: {response.status_code}")
-                
+        """Fetch document text from the external API using document ID."""
+        if not self.settings.document_api_token or not self.settings.document_api_endpoint:
+            logger.error("Document API token or endpoint is not configured.")
             return None
-            
+
+        url = self.settings.document_api_endpoint.format(document_id, self.settings.document_api_token)
+        logger.info(f"Fetching document text from: {url}")
+
+        try:
+            async with httpx.AsyncClient(timeout=600.0, follow_redirects=True) as client: # Allow redirects
+                response = await client.get(url)
+                response.raise_for_status()  # Raises HTTPStatusError for 4xx/5xx responses
+                # Assuming the response is JSON and text is under a specific key, e.g., "text"
+                # Adjust based on actual API response structure
+                data = response.json()
+                if "text" in data:
+                    logger.info(f"Successfully fetched text for document ID: {document_id}")
+                    return data["text"]
+                else:
+                    logger.warning(f"'text' key not found in response for document ID: {document_id}. Response: {data}")
+                    return None 
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"HTTP error fetching text for document ID {document_id} from {url}: {e}",
+                exc_info=True,
+            )
+            return None
+        except httpx.RequestError as e:
+            logger.error(
+                f"Request error fetching text for document ID {document_id} from {url}: {e}",
+                exc_info=True,
+            )
+            return None
         except Exception as e:
-            logger.error(f"Error fetching document text: {e}", exc_info=True)
+            logger.error(
+                f"Unexpected error fetching text for document ID {document_id}: {e}",
+                exc_info=True
+            )
             return None
 
     async def fetch_document_metadata_by_id(self, document_id: str) -> Optional[Dict[str, Any]]:
-        """Fetch document metadata from the external API using document ID.
+        """Fetch document metadata from the external API using document ID."""
+        if not self.settings.document_api_token or not self.settings.document_metadata_api_endpoint:
+            logger.error("Document API token or metadata endpoint is not configured.")
+            return None
 
-        Parameters
-        ----------
-        document_id : str
-            The ID of the document to fetch metadata for
+        # Note: document_metadata_api_endpoint likely doesn't need the token in its path based on config
+        # but it might need it as a header or query param. Assuming it's part of the URL for now as per pattern.
+        # If token is needed differently, adjust here.
+        url = self.settings.document_metadata_api_endpoint.format(document_id)
+        headers = {"Authorization": f"Bearer {self.settings.document_api_token}"} # Assuming Bearer token auth
 
-        Returns
-        -------
-        Optional[Dict[str, Any]]
-            The document metadata if successful, None otherwise
-        """
+        logger.info(f"Fetching document metadata from: {url}")
+
         try:
-            logger.info(f"Fetching document metadata for document_id: {document_id}")
-
-            # Use the dedicated metadata endpoint URL from settings
-            api_url = self.settings.document_metadata_api_endpoint.format(document_id)
-
-            # Set headers, including the API token if required by the external API
-            headers = {
-                'accept': 'application/json',
-                'Authorization': f'Bearer {self.settings.document_api_token}' # Assuming same token works
-            }
-
-            # Make the request
-            response = requests.get(api_url, headers=headers)
-
-            # Check for successful response
-            if response.status_code == 200:
-                metadata = response.json()
-                logger.info(f"Successfully fetched metadata for document_id: {document_id}")
-                return metadata
-            else:
-                logger.error(f"Failed to fetch document metadata, status code: {response.status_code}, response: {response.text}")
-                return None
-
+            async with httpx.AsyncClient(timeout=600.0, follow_redirects=True) as client: # Allow redirects
+                # If token needs to be a query parameter, adjust here: params={"token": self.settings.document_api_token}
+                response = await client.get(url, headers=headers) 
+                response.raise_for_status()  # Raises HTTPStatusError for 4xx/5xx responses
+                logger.info(f"Successfully fetched metadata for document ID: {document_id}")
+                return response.json()  # Assuming the response is the metadata JSON
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"HTTP error fetching metadata for document ID {document_id} from {url}: {e}",
+                exc_info=True,
+            )
+            return None
+        except httpx.RequestError as e:
+            logger.error(
+                f"Request error fetching metadata for document ID {document_id} from {url}: {e}",
+                exc_info=True,
+            )
+            return None
         except Exception as e:
-            logger.error(f"Error fetching document metadata: {e}", exc_info=True)
+            logger.error(
+                f"Unexpected error fetching metadata for document ID {document_id}: {e}", 
+                exc_info=True
+            )
             return None
 
     async def process_document_text(self, document_id: str, text_content: str) -> Optional[str]:

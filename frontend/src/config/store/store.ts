@@ -23,14 +23,16 @@ import {
   isArrayType,
   toSingleType
 } from "./store.utils";
-import { AnswerTableRow, ResolvedEntity, SourceData, Store } from "./store.types";
+import { AnswerTableRow, ResolvedEntity, SourceData, Store, AnswerTable, TableStateListItem } from "./store.types";
 // Import API_ENDPOINTS
 import { ApiError, runBatchQueries, uploadFile, API_ENDPOINTS } from "../api";
 import { AuthError, login as apiLogin, verifyToken } from "../../services/api/auth";
 import { 
   saveTableState as apiSaveTableState, 
   updateTableState as apiUpdateTableState,
-  listTableStates
+  listTableStates,
+  getTableStateById,
+  deleteTableState as apiDeleteTableState
 } from "../../services/api/table-state";
 import { notifications } from "../../utils/notifications";
 import { insertAfter, insertBefore, where } from "@utils/functions";
@@ -48,6 +50,7 @@ export const useStore = create<Store>()(
         isAuthenticated: false,
         isAuthenticating: false
       },
+      savedStates: [], // Initialize savedStates if not already present
       
       // Authentication methods
       login: async (password: string) => {
@@ -173,24 +176,34 @@ export const useStore = create<Store>()(
         });
       },
 
-      getTable: (id = get().activeTableId) => {
-        const current = get().tables.find(t => t.id === id);
-        if (!current) {
-          throw new Error(`No table with id ${id}`);
+      getTable: (id = get().activeTableId): AnswerTable | undefined => {
+        if (!id) {
+            return undefined;
         }
-        return current;
+        const current = get().tables.find(t => t.id === id);
+        if (current) {
+            return current;
+        }
+        return undefined; 
       },
 
       addTable: name => {
         const newTable = getBlankTable(name);
-        set({
-          tables: [...get().tables, newTable],
-          activeTableId: newTable.id
-        });
+        set(state => ({
+          tables: [...state.tables, newTable],
+          activeTableId: newTable.id,
+        }));
       },
 
       editTable: (id, table) => {
-        set({ tables: where(get().tables, t => t.id === id, table) });
+        set(state => ({ tables: where(state.tables, t => t.id === id, table) }));
+        if (table.name) {
+          set(state => ({
+            savedStates: state.savedStates.map(s => 
+              s.id === id ? { ...s, name: table.name as string } : s
+            )
+          }));
+        }
       },
 
       editActiveTable: table => {
@@ -204,30 +217,44 @@ export const useStore = create<Store>()(
       },
 
       deleteTable: async id => {
-        const { tables, activeTableId, auth } = get();
+        const { tables, activeTableId, auth, savedStates, addTable } = get();
         
-        // Delete from the store
         const nextTables = tables.filter(t => t.id !== id);
-        if (isEmpty(nextTables)) return;
-        const nextActiveTable =
-          activeTableId === id ? nextTables[0].id : activeTableId;
-        set({ tables: nextTables, activeTableId: nextActiveTable });
         
-        // Delete from the database if authenticated
+        const nextSavedStates = (savedStates || []).filter(s => s.id !== id);
+
+        if (isEmpty(nextTables) && isEmpty(nextSavedStates)) {
+          console.log("Deleting the last table, adding a new blank one.");
+          set({ savedStates: [] }); 
+          addTable("New Table"); 
+          if (auth.isAuthenticated && auth.token) { 
+            try { await apiDeleteTableState(id); } catch(e) { console.error("Backend delete failed after local delete/add", e); /* handle? */ }
+          }
+          return;
+        }
+        
+        let nextActiveTableId = activeTableId;
+        if (activeTableId === id) {
+          nextActiveTableId = nextSavedStates.length > 0 ? nextSavedStates[0].id : null;
+          if(nextActiveTableId) {
+            console.log(`Deleted active table ${id}, switching to ${nextActiveTableId}`);
+            set({ savedStates: nextSavedStates, activeTableId: nextActiveTableId, isLoading: true });
+            await get().loadTableState(nextActiveTableId);
+          } else {
+            console.log("Deleted active table, no other saved states, adding new table.");
+            set({ savedStates: [] });
+            addTable("New Table");
+          }
+        } else {
+          set({ savedStates: nextSavedStates });
+        }
+
         if (auth.isAuthenticated && auth.token) {
           try {
-            // Import the deleteTableState function from the API
-            const { deleteTableState } = await import("../../services/api/table-state");
-            
-            // Delete the table state from the database
-            await deleteTableState(id);
+            await apiDeleteTableState(id); 
           } catch (error) {
             console.error('Error deleting table state from database:', error);
-            notifications.show({
-              title: 'Delete failed',
-              message: 'Failed to delete table state from database',
-              color: 'red'
-            });
+            notifications.show({ title: 'Delete failed', message: 'Failed to delete table state from database', color: 'red' });
           }
         }
       },
@@ -382,7 +409,7 @@ export const useStore = create<Store>()(
 
       // Updated fillRow to accept an options object
       fillRow: async (id: string, file: File, options = { showNotification: true }) => {
-        const { activeTableId, getTable, editTable } = get();
+        const { activeTableId, getTable, editTable, rerunRows } = get();
         try {
           const document = await uploadFile(file);
           const sourceData: SourceData = {
@@ -398,7 +425,7 @@ export const useStore = create<Store>()(
           });
           
           // Pass option to suppress the "Processing in progress" notification from rerunCells
-          get().rerunRows([id], { suppressInProgressNotification: true });
+          rerunRows([id], { suppressInProgressNotification: true });
           
           // Conditionally show notification based on options
           if (options.showNotification) {
@@ -428,7 +455,7 @@ export const useStore = create<Store>()(
       },
 
       fillRows: async files => {
-        const { activeTableId, getTable, editTable } = get();
+        const { activeTableId, getTable, editTable, rerunRows } = get();
         editTable(activeTableId, { uploadingFiles: true });
         
         let successCount = 0;
@@ -507,7 +534,7 @@ export const useStore = create<Store>()(
               });
               
               // Run queries for this row
-              get().rerunRows([rowId]);
+              rerunRows([rowId]);
               
               successCount++;
               return { success: true, file };
@@ -1466,65 +1493,113 @@ export const useStore = create<Store>()(
         return Promise.resolve();
       },
       
-      loadLatestTableState: async () => {
-        const { auth } = get();
-        
-        // Only load if authenticated
+      // Function to load the full state of a specific table by ID
+      // This might need adjustment based on how activeTableId relates to the 'tables' array
+      // Assumes getTableStateById exists in your API client (table-state.ts)
+      loadTableState: async (tableId: string) => {
+        const { auth, setTableData } = get();
         if (!auth.isAuthenticated || !auth.token) {
           return Promise.resolve();
         }
-        
+        if (!tableId) {
+            console.warn('loadTableState called with no tableId');
+            set({ isLoading: false });
+            return Promise.resolve();
+        }
+
+        set({ isLoading: true });
         try {
-          // Set loading state
-          set({ isLoading: true });
+          // Fetch the full state for the specific table ID
+          const fullStateResponse = await getTableStateById(tableId); // API call
           
-          try {
-            // Get all table states
-            const response = await listTableStates();
-            
-            // If no table states, return
-            if (!response.items || response.items.length === 0) {
-              set({ isLoading: false });
-              return Promise.resolve();
-            }
-            
-            // Sort by updated_at to get the most recent first
+          if (fullStateResponse && fullStateResponse.data) {
+            // Pass the 'data' object and 'name' to setTableData
+            setTableData(tableId, { 
+              name: fullStateResponse.name, // Pass name from the response
+              data: fullStateResponse.data  // Pass the 'data' sub-object
+            });
+            // setTableData will also set isLoading: false and activeTableId
+          } else {
+             console.error(`Failed to load full state for table ${tableId} or data field missing`);
+             set({ isLoading: false }); // Ensure loading is stopped on error
+          }
+        } catch (error) {
+          console.error(`Error loading full table state for ID ${tableId}:`, error);
+          set({ isLoading: false }); // Ensure loading is stopped on error
+        }
+        return Promise.resolve();
+      },
+
+      // Renamed and refactored: fetches list, loads latest full state
+      loadSavedStatesAndActivateLatest: async () => {
+        const { auth, loadTableState, addTable } = get();
+        
+        if (!auth.isAuthenticated || !auth.token) {
+          set({ isLoading: false }); // Ensure isLoading is false if not authenticated
+          return Promise.resolve();
+        }
+        
+        set({ isLoading: true, savedStates: [] }); 
+        let latestStateId: string | null = null;
+        let loadedExistingState = false;
+
+        try {
+          const response = await listTableStates(); 
+          
+          if (response.items && response.items.length > 0) {
             const sortedStates = response.items.sort((a, b) => 
               new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
             );
             
-            // Load all table states into the store
-            const tables = sortedStates.map(state => ({
+            const savedStatesList = sortedStates.map(state => ({
               id: state.id,
               name: state.name,
-              columns: state.data.columns || [],
-              rows: state.data.rows || [],
-              globalRules: state.data.globalRules || [],
-              filters: state.data.filters || [],
-              chunks: state.data.chunks || {},
-              openedChunks: state.data.openedChunks || [],
-              loadingCells: {},
-              uploadingFiles: false
+              created_at: state.created_at,
+              updated_at: state.updated_at,
             }));
-            
-            // Set all tables and make the most recent one active
-            set({
-              tables,
-              activeTableId: tables.length > 0 ? tables[0].id : get().activeTableId,
-              isLoading: false
-            });
-            
-            return Promise.resolve();
-          } catch (apiError) {
-            console.error('Error loading table state from API:', apiError);
-            set({ isLoading: false });
-            return Promise.resolve();
+            set(state => ({ ...state, savedStates: savedStatesList })); // Use functional update for safety
+
+            latestStateId = sortedStates[0].id;
+
+            if (latestStateId) {
+              console.log(`Attempting to load full data for latest state: ${latestStateId}`);
+              await loadTableState(latestStateId); // This will set isLoading: false on completion/error
+              // Check if the table was actually loaded into state.tables
+              const currentTables = get().tables;
+              if (currentTables.some(t => t.id === latestStateId)) {
+                loadedExistingState = true;
+              }
+            } else {
+                 set({ isLoading: false }); // No latest state ID found
+            }
+          } else {
+             console.log("No saved table states found from API.");
+             set({ isLoading: false }); // No items from API
           }
-        } catch (error) {
-          console.error('Error processing loaded table state:', error);
-          set({ isLoading: false });
-          return Promise.resolve();
+        } catch (apiError) {
+          console.error('Error loading table states list from API:', apiError);
+          set({ isLoading: false }); // Error fetching list
         }
+
+        // If no existing state was successfully loaded into state.tables, and state.tables is still empty, add a new one.
+        if (!loadedExistingState) {
+            const currentTables = get().tables; // Get fresh state of tables
+            if (currentTables.length === 0) {
+                 console.log("No tables in store after attempting load, adding a new blank table.");
+                 addTable("New Table"); // Add initial blank table, this will also set activeTableId and add to tables
+                 // addTable might not set isLoading: false, ensure it is
+                 if(get().isLoading) set({ isLoading: false });
+            } else if (!get().activeTableId && currentTables.length > 0) {
+                // A table might exist from a previous session or an error recovery, but not set active
+                console.log("Tables exist in store, but no active one set after load attempt. Setting first as active.");
+                set({ activeTableId: currentTables[0].id, isLoading: false });
+            } else {
+                // Tables exist and one is likely active, or loadTableState set isLoading
+                if(get().isLoading) set({ isLoading: false });
+            }
+        }
+        // If loadedExistingState is true, loadTableState would have handled isLoading.
+        return Promise.resolve();
       },
       // Import CSV data into the grid
       importCsvData: async (data, preserveExistingColumns = false) => {
@@ -1638,7 +1713,48 @@ export const useStore = create<Store>()(
             globalRules: table.globalRules.map(rule => ({ ...rule, resolvedEntities: [] }))
           });
         }
-      }
+      },
+
+      // ADD/REFINE setTableData
+      setTableData: (tableId: string, fullTableDataContainer: { name?: string, data: Omit<AnswerTable, 'id' | 'name'> }) => {
+        set(state => {
+            const existingTableIndex = state.tables.findIndex(t => t.id === tableId);
+            let newTables = [...state.tables];
+            const { name, data: tableData } = fullTableDataContainer;
+
+            const savedStateInfo = state.savedStates?.find(s => s.id === tableId);
+            const finalName = name || savedStateInfo?.name || "Loaded Table";
+
+            if (existingTableIndex !== -1) {
+                // Table exists, update it
+                newTables[existingTableIndex] = {
+                    ...newTables[existingTableIndex], // Keep existing fields not in tableData
+                    ...tableData,                   // Spread the new full data
+                    id: tableId,                    // Ensure id is correct
+                    name: finalName,                // Update name
+                };
+            } else {
+                // Table doesn't exist, add it
+                newTables.push({
+                    id: tableId,
+                    name: finalName,
+                    columns: tableData.columns || [],
+                    rows: tableData.rows || [],
+                    globalRules: tableData.globalRules || [],
+                    filters: tableData.filters || [],
+                    chunks: tableData.chunks || {}, // Default from getBlankTable
+                    openedChunks: tableData.openedChunks || [], // Default from getBlankTable
+                    loadingCells: {}, // Default from getBlankTable
+                    uploadingFiles: false, // Default from getBlankTable
+                    requestProgress: undefined, 
+                    // Add any other default fields from getBlankTable() if necessary
+                    // For example, if getBlankTable() provides specific default structures for these:
+                    // ...getBlankTable() // (but only non-conflicting, non-ID/name fields)
+                });
+            }
+            return { ...state, tables: newTables, activeTableId: tableId, isLoading: false };
+        });
+      },
     }),
     {
       name: "store",

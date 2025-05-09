@@ -10,7 +10,7 @@ from functools import lru_cache
 from typing import List, Optional
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("uvicorn")
@@ -82,7 +82,14 @@ class Settings(BaseSettings):
     # PORTKEY CONFIG
     portkey_api_key: Optional[str] = None
     portkey_gateway_url: Optional[str] = None
-    portkey_enabled: bool = False
+
+    @computed_field
+    @property
+    def portkey_enabled(self) -> bool:
+        """Portkey is enabled if the API key is set."""
+        if self.portkey_api_key:
+            return True
+        return False
 
     # VECTOR DATABASE CONFIG
     vector_db_provider: str = "milvus"
@@ -136,18 +143,6 @@ def get_settings() -> Settings:
     """Get the settings for the application."""
     logger.info("Loading config settings from the environment...")
     
-    # # Debug: Check for .env files
-    # env_paths = ["../../../backend/.env", "../../.env", "../.env", ".env"]
-    # for env_path in env_paths:
-    #     path = Path(env_path)
-    #     if path.exists():
-    #         logger.info(f"Found .env file at: {path.absolute()}")
-    #     else:
-    #         logger.info(f".env file not found at: {path.absolute()}")
-    
-    # # Debug: Current working directory
-    # logger.info(f"Current working directory: {os.getcwd()}")
-    
     settings = Settings()
     
     # Debug log to check if the OpenAI API key is loaded
@@ -162,16 +157,10 @@ def get_settings() -> Settings:
     else:
         logger.warning("Anthropic API key is not set")
     
-    # Check if Portkey is configured
-    if settings.portkey_api_key:
-        logger.info("Portkey API key is set")
-        settings.portkey_enabled = True
+    # Log Portkey status (derived from computed_field)
+    if settings.portkey_enabled:
+        logger.info(f"Portkey integration is enabled (API key found). Gateway: {settings.portkey_gateway_url}")
     else:
-        logger.info("Portkey API key is not set, Portkey integration is disabled")
-    
-    # # Debug log to check vector db provider and Qdrant configuration
-    # logger.info(f"Vector DB provider: {settings.vector_db_provider}")
-    # if settings.vector_db_provider == "qdrant":
-    #     logger.info(f"Qdrant configuration: {settings.qdrant.model_dump()}")
+        logger.info("Portkey integration is disabled (API key not found).")
     
     return settings

@@ -1,5 +1,13 @@
 import { API_ENDPOINTS, getAuthHeaders, ApiError } from '../../config/api';
 import { useStore } from '../../config/store';
+import { 
+  TableStateResponse, 
+  TableStateListItem, 
+  TableState, 
+  TableStateCreate, 
+  TableStateUpdate,
+  TableStateListResponse
+} from '../../config/store/store.types';
 
 // Error class for table state API errors
 export class TableStateError extends Error {
@@ -10,18 +18,20 @@ export class TableStateError extends Error {
 }
 
 // Interface for table state data
-export interface TableState {
-  id: string;
-  name: string;
-  data: any;
-  created_at: string;
-  updated_at: string;
-}
+// This might be duplicative if TableState from '../../types' is comprehensive
+// export interface TableState { // Commenting out if already in types.ts
+//   id: string;
+//   name: string;
+//   data: any;
+//   created_at: string;
+//   updated_at: string;
+// }
 
 // Interface for table state list response
-export interface TableStateListResponse {
-  items: TableState[];
-}
+// This might be duplicative if TableStateListResponse from '../../types' is comprehensive
+// export interface TableStateListResponse { // Commenting out if already in types.ts
+//   items: TableState[];
+// }
 
 /**
  * Helper function to retry a fetch request with exponential backoff
@@ -177,7 +187,8 @@ export async function updateTableState(tableId: string, tableData: any): Promise
     
     // Prepare the data with size optimization for large tables
     const payload = {
-      data: tableData
+      name: tableData.name,
+      data: tableData.data || tableData
     };
     
     // Check payload size
@@ -350,6 +361,8 @@ export async function deleteTableState(tableId: string): Promise<void> {
       3000 // 3 seconds initial delay
     );
     
+    console.log(`Delete table state response: ${response.status} ${response.statusText}`);
+    
     if (!response.ok) {
       const errorData = await response.json();
       throw new TableStateError(errorData.detail || 'Failed to delete table state');
@@ -361,3 +374,38 @@ export async function deleteTableState(tableId: string): Promise<void> {
       : new TableStateError(error instanceof Error ? error.message : 'Unknown error');
   }
 }
+
+// getTableStateById using fetch and retryFetch (consistent with other functions in this file)
+export const getTableStateById = async (id: string): Promise<TableStateResponse> => {
+  console.log(`Fetching table state by ID (using fetch): ${id}`);
+  try {
+    const token = useStore.getState().auth.token;
+    if (!token) {
+      throw new TableStateError('Authentication required for getTableStateById');
+    }
+    const response = await retryFetch(
+      () => fetch(`${API_ENDPOINTS.API_V1}/table-state/${id}`, {
+        method: 'GET',
+        headers: getAuthHeaders(), // Use existing getAuthHeaders
+        credentials: 'include'
+      }),
+      5, // Retries
+      3000 // Initial delay
+    );
+
+    console.log(`Get table state by ID (${id}) response: ${response.status} ${response.statusText}`);
+    if (!response.ok) {
+      let errorMessage = `Failed to get table state by ID ${id}`;
+      try {
+        const errorText = await response.text();
+        const errorData = JSON.parse(errorText);
+        errorMessage = errorData.detail || errorMessage;
+      } catch (e) { /* Ignore if parsing error response fails */ }
+      throw new TableStateError(`${errorMessage} - Status: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error: any) {
+    console.error(`Error in getTableStateById for ID ${id}:`, error);
+    throw error instanceof TableStateError ? error : new TableStateError(error.message || 'Unknown error fetching table state by ID');
+  }
+};

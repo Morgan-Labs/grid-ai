@@ -1,6 +1,7 @@
 import { Text, Tooltip } from "@mantine/core";
+import { listTableStates } from "../../../services/api/table-state";
+import { TableStateListItem } from "../../../config/store/store.types";
 import { useStore } from "@config/store";
-import { listTableStates, TableState } from "../../../services/api/table-state";
 import { useState, useEffect } from "react";
 
 export function KtTimestamp() {
@@ -11,7 +12,7 @@ export function KtTimestamp() {
     const fetchLastUpdated = async () => {
       try {
         const response = await listTableStates();
-        const tableState = response.items.find((item: TableState) => item.id === table.id);
+        const tableState = response.items.find((item: TableStateListItem) => item.id === table.id);
         if (tableState) {
           setLastUpdated(tableState.updated_at);
         }

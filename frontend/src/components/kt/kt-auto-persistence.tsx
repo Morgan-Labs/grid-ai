@@ -39,7 +39,7 @@ export function KtAutoPersistence() {
   useEffect(() => {
     if (isAuthenticated) {
       // Load the latest table state
-      useStore.getState().loadLatestTableState()
+      useStore.getState().loadSavedStatesAndActivateLatest()
         .then(() => {
           // No logs or notifications for normal operation
           isFirstLoad.current = false;
@@ -70,13 +70,14 @@ export function KtAutoPersistence() {
               globalRulesHash: JSON.stringify(table.globalRules),
               filtersHash: JSON.stringify(table.filters)
             };
-          } catch (e) {
+          } catch (e: any) {
+            console.error('Error initializing prevTableStateRef:', e);
             prevTableStateRef.current = null;
           }
         })
-        .catch((error) => {
+        .catch((error: any) => {
           // Just log the error without showing notifications
-          console.error('Error loading table state:', error);
+          console.error('Error loading table state in KtAutoPersistence:', error);
         });
     }
   }, [isAuthenticated]);
