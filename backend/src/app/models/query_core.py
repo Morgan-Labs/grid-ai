@@ -1,8 +1,8 @@
 """Query model."""
 
-from typing import List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, TypeAlias, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class EntitySource(BaseModel):
@@ -39,8 +39,10 @@ class Rule(BaseModel):
 class Chunk(BaseModel):
     """Chunk model."""
 
+    id: str
     content: str
-    page: int
+    metadata: Dict[str, Any]
+    score: Optional[float] = None
 
 
 class Answer(BaseModel):
@@ -54,5 +56,19 @@ class Answer(BaseModel):
     type: str
 
 
-QueryType = Literal["decomposition", "hybrid", "simple_vector"]
-FormatType = Literal["int", "str", "bool", "int_array", "str_array"]
+QueryType: TypeAlias = Literal[
+    "decomposition", "hybrid", "simple_vector", "inference"
+]
+FormatType: TypeAlias = Literal[
+    "str", "int", "bool", "str_array", "int_array", "entity"
+]
+
+
+class QueryResult(BaseModel):
+    """The result of a query."""
+
+    answer: Any
+    chunks: Optional[List[Chunk]] = []
+    resolved_entities: Optional[List[Dict[str, Any]]] = []
+    queued: bool = False
+    queued_query: Optional[Any] = None

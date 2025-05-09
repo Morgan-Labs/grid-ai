@@ -32,6 +32,110 @@ QUERY_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_QUERIES)
 MAX_RETRIES = 2
 RETRY_DELAY = 1.0  # seconds
 
+# Document readiness check configuration
+MAX_READINESS_CHECKS = 3
+READINESS_CHECK_INTERVAL = 2.0  # seconds
+
+# Query queue for documents that are still processing
+DOCUMENT_QUERY_QUEUE = {}  # document_id -> List[QueuedQuery]
+
+# Pending queries by document ID
+class QueuedQuery:
+    """A class to represent a query that's waiting for a document to be ready"""
+    
+    def __init__(self, query_type: QueryType, query: str, document_id: str, 
+                 rules: List[Rule], format: FormatType, retries_left: int = MAX_READINESS_CHECKS):
+        self.query_type = query_type
+        self.query = query
+        self.document_id = document_id
+        self.rules = rules
+        self.format = format
+        self.retries_left = retries_left
+        self.future = asyncio.get_event_loop().create_future()
+        self.created_at = time.time()
+    
+    async def execute(self, llm_service: CompletionService, vector_db_service: Any) -> QueryResult:
+        """Execute the query and resolve its future"""
+        try:
+            result = await process_query_with_retry(
+                self.query_type, self.query, self.document_id, 
+                self.rules, self.format, llm_service, vector_db_service
+            )
+            self.future.set_result(result)
+            return result
+        except Exception as e:
+            self.future.set_exception(e)
+            raise
+
+async def check_document_readiness(document_id: str, document_service) -> bool:
+    """
+    Check if a document is ready for querying.
+    
+    Parameters
+    ----------
+    document_id : str
+        The ID of the document to check
+    document_service : DocumentService
+        The document service for checking status
+        
+    Returns
+    -------
+    bool
+        True if the document is ready, False otherwise
+    """
+    try:
+        status = await document_service.get_document_status(document_id)
+        logger.info(f"Document {document_id} status: {status}")
+        return status == "completed"
+    except Exception as e:
+        logger.error(f"Error checking document status: {e}")
+        # If we can't check status, assume it's not ready
+        return False
+
+async def queue_query_for_document(
+    query_type: QueryType,
+    query: str,
+    document_id: str,
+    rules: List[Rule],
+    format: FormatType,
+    document_service,
+) -> QueuedQuery:
+    """
+    Queue a query for a document that might not be ready yet.
+    
+    Parameters
+    ----------
+    query_type : QueryType
+        The type of query to perform
+    query : str
+        The query string
+    document_id : str
+        The document ID to query against
+    rules : List[Rule]
+        Rules to apply to the query
+    format : FormatType
+        The format to return the result in
+    document_service : DocumentService
+        Service for checking document readiness
+        
+    Returns
+    -------
+    QueuedQuery
+        A queued query object with a future that will be resolved when the query completes
+    """
+    # Initialize document queue if it doesn't exist
+    if document_id not in DOCUMENT_QUERY_QUEUE:
+        DOCUMENT_QUERY_QUEUE[document_id] = []
+    
+    # Create a new queued query and add it to the queue
+    queued_query = QueuedQuery(query_type, query, document_id, rules, format)
+    DOCUMENT_QUERY_QUEUE[document_id].append(queued_query)
+    
+    # Log the queuing
+    logger.info(f"Queued query for document {document_id}: {query[:30]}...")
+    
+    return queued_query
+
 
 def get_search_method(
     query_type: QueryType, vector_db_service: Any
@@ -122,12 +226,34 @@ async def process_query_with_retry(
     llm_service: CompletionService,
     vector_db_service: Any,
     retries: int = MAX_RETRIES,
+    document_service = None,
 ) -> QueryResult:
     """Process a query with optimized retry logic for faster response times."""
     last_exception = None
     
     # Truncate query for logging to avoid excessive log size
     query_preview = query[:30] + "..." if len(query) > 30 else query
+    
+    # Check document readiness if document_service is provided
+    if document_service:
+        is_ready = await check_document_readiness(document_id, document_service)
+        if not is_ready:
+            logger.warning(f"Document {document_id} is not ready for query: {query_preview}")
+            
+            # Create a queued query that will be processed when document is ready
+            queued_query = await queue_query_for_document(
+                query_type, query, document_id, rules, format, document_service
+            )
+            
+            # Return a placeholder result indicating the query is queued
+            # The caller should check the future for the actual result
+            return QueryResult(
+                answer="Document is still processing, query has been queued",
+                chunks=[],
+                resolved_entities=[],
+                queued=True,
+                queued_query=queued_query
+            )
     
     for attempt in range(retries + 1):
         try:
@@ -191,6 +317,39 @@ async def process_query(
     vector_db_service: Any,
 ) -> QueryResult:
     """Process the query based on the specified type."""
+    # Handle inference queries directly with the LLM
+    if query_type == "inference":
+        try:
+            from app.services.llm_service import generate_inferred_response
+            # Generate response directly from LLM without document retrieval
+            answer = await generate_inferred_response(llm_service, query, rules, format)
+            answer_value = answer["answer"]
+            
+            # Create a basic result with just the answer
+            return QueryResult(
+                answer=answer_value,
+                chunks=[],
+                resolved_entities=[]
+            )
+        except Exception as e:
+            logger.error(f"Error in inference query: {e}")
+            # Return a fallback result
+            if format == "int":
+                fallback = 0
+            elif format == "bool":
+                fallback = False
+            elif format in ["int_array", "str_array"]:
+                fallback = []
+            else:
+                fallback = ""
+                
+            return QueryResult(
+                answer=fallback,
+                chunks=[],
+                resolved_entities=[]
+            )
+    
+    # For non-inference queries, continue with normal document-based processing
     search_method = get_search_method(query_type, vector_db_service)
 
     # Step 1: Get search response
@@ -250,349 +409,104 @@ async def process_query(
                     transformations = transform_dict
                     answer_value = transformed_value
 
-    return QueryResult(
+    # Construct the QueryResult with resolved entities
+    result = QueryResult(
         answer=answer_value,
-        chunks=result_chunks[:10],
-        resolved_entities=(
-            [
+        chunks=result_chunks if format in ["str", "str_array"] else [],
+        resolved_entities=[
                 ResolvedEntitySchema(
                     original=transformations["original"],
                     resolved=transformations["resolved"],
-                    source={"type": "column", "id": "some-id"},
-                    entityType="some-type",
-                )
-            ]
-            if transformations["original"] or transformations["resolved"]
-            else None
-        ),
+            )
+        ]
+        if transformations["original"] != transformations["resolved"]
+        else [],
     )
 
+    return result
 
-async def process_queries_in_parallel(
-    queries: List[Dict[str, Any]],
-    llm_service: CompletionService,
-    vector_db_service: Any,
-) -> List[QueryResult]:
+# Add a background task to process query queue
+async def process_document_query_queue(document_id: str, document_service, llm_service: CompletionService, vector_db_service: Any):
     """
-    Process multiple queries in parallel with optimized concurrency control.
+    Process all queued queries for a document once it's ready.
     
     Parameters
     ----------
-    queries : List[Dict[str, Any]]
-        List of query parameters, each containing:
-        - query_type: QueryType
-        - query: str
-        - document_id: str
-        - rules: List[Rule]
-        - format: FormatType
-        - _original_req: Optional[QueryRequestSchema] - Original request with model info
+    document_id : str
+        The document ID to process queued queries for
+    document_service : DocumentService
+        The document service for checking readiness
     llm_service : CompletionService
-        The language model service.
+        The LLM service for processing queries
     vector_db_service : Any
-        The vector database service.
-        
-    Returns
-    -------
-    List[QueryResult]
-        List of query results in the same order as the input queries.
+        The vector DB service for retrieving document chunks
     """
-    logger.info(f"Processing {len(queries)} queries in parallel")
+    if document_id not in DOCUMENT_QUERY_QUEUE or not DOCUMENT_QUERY_QUEUE[document_id]:
+        logger.info(f"No queries queued for document {document_id}")
+        return
     
-    # Prioritize queries - put simpler queries first for faster initial results
-    prioritized_queries = sorted(
-        enumerate(queries), 
-        key=lambda x: 0 if x[1]["query_type"] == "simple_vector" else 1
-    )
-    original_indices = [idx for idx, _ in prioritized_queries]
-    sorted_queries = [q for _, q in prioritized_queries]
+    # Check if document is ready
+    is_ready = await check_document_readiness(document_id, document_service)
+    if not is_ready:
+        logger.info(f"Document {document_id} still not ready, will retry queued queries later")
+        return
     
-    # Create tasks with retry logic and custom LLM services if needed
-    tasks = []
-    for q in sorted_queries:
-        # Check if this query has a custom model specified
-        custom_llm = llm_service
-        if "_original_req" in q and hasattr(q["_original_req"], "prompt") and hasattr(q["_original_req"].prompt, "llm_model") and q["_original_req"].prompt.llm_model:
-            # Create a copy of the settings to avoid modifying the global settings
-            from app.core.config import Settings
-            from app.core.dependencies import get_settings
-            from app.services.llm.factory import CompletionServiceFactory
-            
-            # Get current settings
-            settings = get_settings()
-            
-            # Create a new settings object for this query
-            req_settings = Settings()
-            req_settings.llm_model = q["_original_req"].prompt.llm_model
-            req_settings.llm_provider = settings.llm_provider
-            req_settings.portkey_api_key = settings.portkey_api_key
-            req_settings.portkey_enabled = settings.portkey_enabled
-            req_settings.openai_api_key = settings.openai_api_key
-            
-            # Auto-detect provider from model name
-            provider = None
-            model = q["_original_req"].prompt.llm_model.lower()
-            if "claude" in model:
-                provider = "anthropic"
-            elif "gemini" in model:
-                provider = "gemini"
-            elif "gpt" in model:
-                provider = "openai"
-            
-            # Configure LLM service
-            # Provider keys for all providers
-            provider_keys = {
-                "anthropic": "anthropic-a27fda",
-                "gemini": "gemini-3161fc", 
-                "openai": "openai-6a3e17"
-            }
-            
-            # Get virtual key for the provider
-            virtual_key = provider_keys.get(provider)
-            
-            if provider != "openai":
-                # For non-OpenAI providers, always use Portkey
-                req_settings.llm_provider = "portkey"
-                custom_llm = CompletionServiceFactory.create_service(req_settings)
-            else:
-                # For OpenAI, we can use Portkey too
-                req_settings.llm_provider = "portkey"
-                custom_llm = CompletionServiceFactory.create_service(req_settings)
-            
-            # Configure virtual key and model for all providers
-            if hasattr(custom_llm, 'update_virtual_key') and virtual_key:
-                try:
-                    logger.info(f"Setting virtual key for {provider}: {virtual_key} with model: {model}")
-                    custom_llm.update_virtual_key(virtual_key, provider, model)
-                except Exception as e:
-                    logger.error(f"Error setting virtual key: {str(e)}")
-            
-            logger.info(f"Using custom LLM model for query: {req_settings.llm_model}")
-        
-        # Create task with the appropriate LLM service
-        task = process_query_with_retry(
-            q["query_type"],
-            q["query"],
-            q["document_id"],
-            q["rules"],
-            q["format"],
-            custom_llm,
-            vector_db_service,
-        )
-        tasks.append(task)
+    logger.info(f"Processing {len(DOCUMENT_QUERY_QUEUE[document_id])} queued queries for document {document_id}")
     
-    # Use a larger batch size for the first batch to get initial results faster
-    first_batch_size = min(len(tasks), MAX_CONCURRENT_QUERIES * 2)
-    remaining_tasks = tasks[first_batch_size:]
+    # Process all queued queries
+    queued_queries = DOCUMENT_QUERY_QUEUE[document_id].copy()
+    DOCUMENT_QUERY_QUEUE[document_id] = []  # Clear the queue to avoid reprocessing
     
-    # Process first batch with higher priority
-    logger.info(f"Processing first batch with {first_batch_size} queries")
-    first_batch_results = await asyncio.gather(*tasks[:first_batch_size], return_exceptions=True)
-    
-    # Process remaining batches
-    remaining_results = []
-    if remaining_tasks:
-        # Process remaining tasks with standard concurrency
-        logger.info(f"Processing remaining {len(remaining_tasks)} queries")
-        remaining_results = await asyncio.gather(*remaining_tasks, return_exceptions=True)
-    
-    # Combine results
-    batch_results = first_batch_results + remaining_results
-    
-    # Process results, converting exceptions to fallback values
-    results = [None] * len(queries)  # Pre-allocate result list
-    
-    for i, result in enumerate(batch_results):
-        original_idx = original_indices[i]
-        q = queries[original_idx]
-        
-        if isinstance(result, Exception):
-            logger.error(f"Query {original_idx} failed: {str(result)}")
-            # Create fallback result based on format
-            if q["format"] == "int":
-                fallback_answer = 0
-            elif q["format"] == "bool":
-                fallback_answer = False
-            elif q["format"].endswith("_array"):
-                fallback_answer = []
-            else:
-                fallback_answer = ""
-            
-            results[original_idx] = QueryResult(
-                answer=fallback_answer,
-                chunks=[],
-                resolved_entities=[]
+    for queued_query in queued_queries:
+        try:
+            result = await process_query_with_retry(
+                queued_query.query_type,
+                queued_query.query,
+                queued_query.document_id,
+                queued_query.rules,
+                queued_query.format,
+                llm_service,
+                vector_db_service
             )
-        else:
-            results[original_idx] = result
+            
+            # Set the result in the future
+            if not queued_query.future.done():
+                queued_query.future.set_result(result)
+                
+            logger.info(f"Processed queued query for document {document_id}: {queued_query.query[:30]}...")
+            
+        except Exception as e:
+            logger.error(f"Error processing queued query: {e}")
+            # Set exception in the future if it's not already done
+            if not queued_query.future.done():
+                queued_query.future.set_exception(e)
+
+# Add a function to schedule periodic processing of queued queries
+async def schedule_query_queue_processing(document_service, llm_service: CompletionService, vector_db_service: Any):
+    """
+    Periodically process queued queries for documents that might have finished processing.
     
-    return results
-
-
-# Convenience functions for specific query types
-async def decomposition_query(
-    query: str,
-    document_id: str,
-    rules: List[Rule],
-    format: FormatType,
-    llm_service: CompletionService,
-    vector_db_service: Any,
-) -> QueryResult:
-    """Process the query based on the decomposition type."""
-    return await process_query_with_retry(
-        "decomposition",
-        query,
-        document_id,
-        rules,
-        format,
-        llm_service,
-        vector_db_service,
-    )
-
-
-async def hybrid_query(
-    query: str,
-    document_id: str,
-    rules: List[Rule],
-    format: FormatType,
-    llm_service: CompletionService,
-    vector_db_service: Any,
-) -> QueryResult:
-    """Process the query based on the hybrid type."""
-    return await process_query_with_retry(
-        "hybrid",
-        query,
-        document_id,
-        rules,
-        format,
-        llm_service,
-        vector_db_service,
-    )
-
-
-async def simple_vector_query(
-    query: str,
-    document_id: str,
-    rules: List[Rule],
-    format: FormatType,
-    llm_service: CompletionService,
-    vector_db_service: Any,
-) -> QueryResult:
-    """Process the query based on the simple vector type."""
-    return await process_query_with_retry(
-        "simple_vector",
-        query,
-        document_id,
-        rules,
-        format,
-        llm_service,
-        vector_db_service,
-    )
-
-
-async def inference_query(
-    query: str,
-    rules: List[Rule],
-    format: FormatType,
-    llm_service: CompletionService,
-) -> QueryResult:
-    """Generate a response with optimized processing, no need for vector retrieval."""
-    # Truncate query for logging
-    # query_preview = query[:30] + "..." if len(query) > 30 else query
-    # logger.info(f"Processing inference query: {query_preview}")
-    
-    try:
-        # Use the semaphore to limit concurrency
-        async with QUERY_SEMAPHORE:
-            start_time = time.time()
+    Parameters
+    ----------
+    document_service : DocumentService
+        The document service for checking readiness
+    llm_service : CompletionService
+        The LLM service for processing queries
+    vector_db_service : Any
+        The vector DB service for retrieving document chunks
+    """
+    while True:
+        try:
+            # Process queues for all documents
+            documents_with_queues = list(DOCUMENT_QUERY_QUEUE.keys())
             
-            # Generate response from LLM
-            answer = await generate_inferred_response(
-                llm_service, query, rules, format
-            )
-            answer_value = answer["answer"]
+            for document_id in documents_with_queues:
+                if DOCUMENT_QUERY_QUEUE[document_id]:  # Only process if there are queued queries
+                    await process_document_query_queue(document_id, document_service, llm_service, vector_db_service)
             
-            # Fast path for simple types
-            if format in ["int", "bool"] and not isinstance(answer_value, (list, dict)):
-                return QueryResult(answer=answer_value, chunks=[])
+            # Sleep before next check
+            await asyncio.sleep(5)  # Check every 5 seconds
             
-            # Optimized array handling
-            if format.endswith("_array"):
-                # Check if this is a tag query - use empty arrays for errors
-                is_tag_query = any(keyword in query.lower() for keyword in 
-                                ["tag", "categor", "injur", "type", "list"])
-                
-                # Convert string to array if needed
-                if isinstance(answer_value, str):
-                    try:
-                        # Try to parse as a Python list
-                        import ast
-                        cleaned_value = answer_value.strip()
-                        if cleaned_value.startswith('[') and cleaned_value.endswith(']'):
-                            try:
-                                parsed_value = ast.literal_eval(cleaned_value)
-                                if isinstance(parsed_value, list):
-                                    answer_value = parsed_value
-                            except (ValueError, SyntaxError):
-                                # Fallback to simple parsing
-                                items = cleaned_value[1:-1].split(',')
-                                items = [item.strip().strip('\'"') for item in items if item.strip()]
-                                
-                                if format == 'int_array':
-                                    try:
-                                        answer_value = [int(item) for item in items]
-                                    except ValueError:
-                                        answer_value = [] if is_tag_query else [0]
-                                else:
-                                    answer_value = items
-                    except Exception:
-                        # If all parsing fails, use default
-                        answer_value = [] if is_tag_query else ([0] if format == 'int_array' else [])
-                
-                # Ensure we have a list
-                if not isinstance(answer_value, list):
-                    answer_value = [] if is_tag_query else ([0] if format == 'int_array' else [])
-            
-            # Entity resolution if needed
-            resolve_entity_rules = [rule for rule in rules if rule.type == "resolve_entity"]
-            if resolve_entity_rules and answer_value:
-                # Build replacements dictionary
-                replacements = {}
-                for rule in resolve_entity_rules:
-                    if rule.options:
-                        try:
-                            rule_replacements = dict(option.split(":") for option in rule.options)
-                            replacements.update(rule_replacements)
-                        except ValueError:
-                            continue
-                
-                # Apply replacements if any
-                if replacements:
-                    if isinstance(answer_value, list):
-                        transformed_value, _ = replace_keywords(answer_value, replacements)
-                        answer_value = transformed_value
-                    else:
-                        transformed_value, _ = replace_keywords_in_string(str(answer_value), replacements)
-                        answer_value = transformed_value
-            
-            elapsed = time.time() - start_time
-            logger.info(f"Inference query processed in {elapsed:.2f}s")
-            return QueryResult(answer=answer_value, chunks=[])
-        
-    except Exception as e:
-        logger.error(f"Error in inference query: {str(e)}")
-        
-        # Fast fallback creation based on format
-        is_tag_query = format.endswith('_array') and any(
-            keyword in query.lower() for keyword in ["tag", "categor", "injur", "type", "list"]
-        )
-        
-        if format == 'int':
-            fallback_value = 0
-        elif format == 'bool':
-            fallback_value = False
-        elif format.endswith('_array'):
-            fallback_value = []
-        else:
-            fallback_value = ""
-            
-        return QueryResult(answer=fallback_value, chunks=[])
+        except Exception as e:
+            logger.error(f"Error in query queue processing: {e}")
+            await asyncio.sleep(10)  # Sleep longer on error

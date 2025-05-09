@@ -1,12 +1,15 @@
 """Main module for the AI Grid API service with optimized service initialization."""
 
+import asyncio
 import logging
 import os
 from typing import Any, Dict
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
+import uvicorn
 
 from app.api.v1.api import api_router
 from app.core.auth import decode_token
@@ -15,16 +18,74 @@ from app.services.document_service import DocumentService
 from app.services.embedding.factory import EmbeddingServiceFactory
 from app.services.llm.factory import CompletionServiceFactory
 from app.services.vector_db.factory import VectorDBFactory
+from app.core.dependencies import get_document_service, get_llm_service, get_vector_db_service
+from app.services.query_service import schedule_query_queue_processing
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
+# Global task reference to keep the background task running
+query_queue_task = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for the FastAPI app.
+    This runs on application startup and shutdown.
+    """
+    # On startup: Start background tasks
+    logger.info("Starting application and background tasks...")
+    
+    # Get services directly from app state
+    await startup_event()  # Ensure services are initialized
+    
+    # Initialize services if not already initialized
+    if not hasattr(app.state, 'services_initialized') or not app.state.services_initialized:
+        logger.warning("Services not initialized properly, skipping background tasks")
+        yield
+        return
+    
+    document_service = app.state.document_service
+    llm_service = app.state.llm_service
+    vector_db_service = app.state.vector_db_service
+    
+    if not document_service or not llm_service or not vector_db_service:
+        logger.error("Required services not available, can't start background tasks")
+        yield
+        return
+    
+    # Start query queue processing task
+    global query_queue_task
+    try:
+        query_queue_task = asyncio.create_task(
+            schedule_query_queue_processing(document_service, llm_service, vector_db_service)
+        )
+        logger.info("Query queue processing background task started")
+    except Exception as e:
+        logger.error(f"Failed to start query queue processing: {e}")
+    
+    yield
+    
+    # On shutdown: Clean up resources
+    logger.info("Shutting down application and background tasks...")
+    
+    # Cancel the query queue processing task
+    if query_queue_task:
+        query_queue_task.cancel()
+        try:
+            await query_queue_task
+        except asyncio.CancelledError:
+            logger.info("Query queue processing task cancelled")
+    
+    logger.info("Application shutdown complete")
+
 app = FastAPI(
     title=settings.project_name,
     openapi_url=f"{settings.api_v1_str}/openapi.json",
     redirect_slashes=False,  # Disable automatic redirects for trailing slashes
+    lifespan=lifespan,
 )
 
 # Configure CORS with enhanced settings
@@ -285,3 +346,8 @@ async def pong(settings: Settings = Depends(get_settings)) -> Dict[str, Any]:
         "environment": settings.environment,
         "testing": settings.testing,
     }
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "app.main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), reload=True
+    )

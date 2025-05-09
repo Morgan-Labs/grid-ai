@@ -8,7 +8,7 @@ from typing import Dict, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
-from app.core.dependencies import get_llm_service, get_vector_db_service, get_settings
+from app.core.dependencies import get_llm_service, get_vector_db_service, get_settings, get_document_service
 from app.core.config import Settings
 from app.schemas.query_api import (
     QueryAnswer,
@@ -18,19 +18,39 @@ from app.schemas.query_api import (
 )
 from app.services.llm.base import CompletionService
 from app.services.query_service import (
-    decomposition_query,
-    hybrid_query,
-    inference_query,
-    process_queries_in_parallel,
-    simple_vector_query,
+    process_query_with_retry,
+    schedule_query_queue_processing,
+    check_document_readiness
 )
 from app.services.vector_db.base import VectorDBService
+from app.services.document_service import DocumentService
+from app.models.query_core import Chunk, FormatType, QueryType, Rule
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["query"])
 logger.info("Query router initialized")
+
+# Add utility function for inference queries
+async def inference_query(
+    query: str,
+    rules: List[Rule],
+    format: FormatType,
+    llm_service: CompletionService,
+) -> QueryResult:
+    """Generate a response directly from LLM without document retrieval."""
+    # Use process_query_with_retry with a special document ID for inference
+    dummy_doc_id = "00000000000000000000000000000000"  # Special ID for inference
+    return await process_query_with_retry(
+        query_type="inference",
+        query=query,
+        document_id=dummy_doc_id,
+        rules=rules,
+        format=format,
+        llm_service=llm_service,
+        vector_db_service=None
+    )
 
 
 @router.options(
@@ -197,6 +217,7 @@ async def run_query(
     resp: Response,
     llm_service: CompletionService = Depends(get_llm_service),
     vector_db_service: VectorDBService = Depends(get_vector_db_service),
+    document_service: DocumentService = Depends(get_document_service),
     settings: Settings = Depends(get_settings),
 ) -> QueryAnswerResponse:
     # Ensure CORS headers are present
@@ -221,6 +242,8 @@ async def run_query(
         The language model service.
     vector_db_service : VectorDBService
         The vector database service.
+    document_service : DocumentService
+        The document service for checking document readiness.
 
     Returns
     -------
@@ -249,100 +272,122 @@ async def run_query(
     if request.prompt.llm_model:
         logger.info(f"🔄 Configuring LLM service for model: {request.prompt.llm_model}")
         llm_service = configure_llm_service(
-            llm_service, 
-            settings, 
+            llm_service, settings, 
             request.prompt.llm_model, 
             request.prompt.llm_provider
         )
-        logger.info(f"✅ LLM service configured - Provider: {settings.llm_provider}, Model: {settings.llm_model}")
     
     try:
-        # Handle inference queries (no document)
-        if request.document_id == "00000000000000000000000000000000":
-            query_response = await inference_query(
-                request.prompt.query,
-                request.prompt.rules,
-                request.prompt.type,
-                llm_service,
-            )
-        else:
-            # Determine query type
-            query_type = (
-                "hybrid"
-                if request.prompt.rules or request.prompt.type == "bool"
-                else "vector"
-            )
-
-            query_functions = {
-                "decomposed": decomposition_query,
-                "hybrid": hybrid_query,
-                "vector": simple_vector_query,
-            }
-
-            query_response = await query_functions[query_type](
-                request.prompt.query,
-                request.document_id,
-                request.prompt.rules,
-                request.prompt.type,
-                llm_service,
-                vector_db_service,
-            )
-
-        # Convert to QueryResult if needed
-        if not isinstance(query_response, QueryResult):
-            query_response = QueryResult(**query_response)
-
-        # Create answer
-        answer = QueryAnswer(
-            id=uuid.uuid4().hex,
-            document_id=request.document_id,
-            prompt_id=request.prompt.id,
-            answer=query_response.answer,
-            type=request.prompt.type,
-        )
+        query_start_time = time.time()
+        request_id = str(uuid.uuid4())
         
-        # Create response
-        response_data = QueryAnswerResponse(
-            answer=answer,
-            chunks=query_response.chunks or [],
-            resolved_entities=query_response.resolved_entities or [],
-        )
-
+        query_type = request.prompt.type
+        query = request.prompt.query
+        document_id = request.document_id
+        rules = request.prompt.rules
+        format = request.prompt.format or "str"
+        
+        # Log request details with request ID for tracking
+        logger.info(f"💬 [{request_id}] Processing query: '{query[:50]}...' (Type: {query_type})")
+        
+        # Prepare result based on query type
+        result = None
+        
+        # Check if this is an inference query (no document needed)
+        if query_type == "inference":
+            try:
+                result = await inference_query(query, rules, format, llm_service)
+            except Exception as e:
+                logger.error(f"🔴 [{request_id}] Error in inference query: {str(e)}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Error in inference query: {str(e)}",
+                )
+        # For document-based queries, process with document readiness check
+        elif document_id:
+            try:
+                result = await process_query_with_retry(
+                    query_type,
+                    query,
+                    document_id,
+                    rules,
+                    format,
+                    llm_service,
+                    vector_db_service,
+                    document_service=document_service  # Pass document service for readiness check
+                )
+                
+                # Check if the result indicates the query was queued
+                if hasattr(result, 'queued') and result.queued:
+                    # The query was queued because document isn't ready yet
+                    logger.info(f"🟡 [{request_id}] Query queued for document {document_id}, waiting for processing to complete")
+                    
+                    # Handle the queued query differently
+                    if hasattr(result, 'queued_query') and result.queued_query:
+                        try:
+                            # Wait for the future to be resolved (with timeout)
+                            # We'll wait up to 1 second for now, and return a temporary response
+                            # The client should poll the results endpoint
+                            timeout = 1.0  # seconds
+                            try:
+                                # Try to get result with timeout
+                                actual_result = await asyncio.wait_for(result.queued_query.future, timeout)
+                                # If we got the result, use it
+                                result = actual_result
+                                logger.info(f"✅ [{request_id}] Document became ready while waiting, got result immediately")
+                            except asyncio.TimeoutError:
+                                # If it times out, we'll return the queued status
+                                logger.info(f"⏳ [{request_id}] Returning queued status, document still processing")
+                                # Return a response indicating document is still processing
+                                return QueryAnswerResponse(
+                                    query=query,
+                                    result=QueryAnswer(
+                                        answer="Document is still processing, please try again shortly",
+                                        processing=True  # Indicate document is still processing
+                                    ),
+                                    document_id=document_id,
+                                    retrieval_type=query_type,
+                                    timing={
+                                        "total_seconds": time.time() - query_start_time,
+                                    }
+                                )
+                        except Exception as future_error:
+                            logger.error(f"🔴 [{request_id}] Error waiting for queued query result: {str(future_error)}")
+                            # Continue with regular query flow
+            except Exception as e:
+                logger.error(f"🔴 [{request_id}] Error in document query: {str(e)}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Error processing query: {str(e)}",
+                )
+        else:
+            # No document ID and not an inference query
+            logger.error(f"🔴 [{request_id}] Document ID is required for non-inference queries")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Document ID is required for this query type",
+            )
+        
+        # Create response from the result
+        response_data = create_response_from_result(request, result)
+        
+        # Add timing information
+        response_data.timing = {
+            "total_seconds": time.time() - query_start_time,
+        }
+        
+        # Log completion
+        answer_preview = str(response_data.result.answer)[:50]
+        answer_preview = answer_preview + "..." if len(str(response_data.result.answer)) > 50 else answer_preview
+        logger.info(f"✅ [{request_id}] Query completed in {response_data.timing['total_seconds']:.2f}s, answer: {answer_preview}")
+        
         return response_data
-
-    except asyncio.TimeoutError:
-        logger.error("Timeout occurred while processing the query")
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="Request timed out while waiting for a response from the language model"
-        )
-    except ValueError as e:
-        logger.error(f"Invalid input: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid input: {str(e)}"
-        )
     except Exception as e:
-        logger.error(f"Error processing query: {str(e)}")
-        
-        # Create a type-appropriate fallback
-        if request.prompt.type == "int":
-            fallback = 0
-        elif request.prompt.type == "bool":
-            fallback = False
-        elif request.prompt.type == "int_array" or request.prompt.type == "str_array":
-            fallback = []
-        else:
-            fallback = f"Error processing query"
-            
-        answer = QueryAnswer(
-            id=uuid.uuid4().hex,
-            document_id=request.document_id,
-            prompt_id=request.prompt.id,
-            answer=fallback,
-            type=request.prompt.type,
+        logger.error(f"🔴 Unexpected error in run_query: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error: {str(e)}",
         )
-        return QueryAnswerResponse(answer=answer, chunks=[], resolved_entities=[])
     finally:
         # Restore original settings
         settings.llm_provider = original_provider
@@ -356,6 +401,7 @@ async def run_batch_queries(
     requests: List[QueryRequestSchema],
     llm_service: CompletionService = Depends(get_llm_service),
     vector_db_service: VectorDBService = Depends(get_vector_db_service),
+    document_service: DocumentService = Depends(get_document_service),
     settings: Settings = Depends(get_settings),
 ) -> List[QueryAnswerResponse]:
     """
@@ -372,6 +418,8 @@ async def run_batch_queries(
         The language model service.
     vector_db_service : VectorDBService
         The vector database service.
+    document_service : DocumentService
+        The document service for checking readiness.
 
     Returns
     -------
@@ -398,137 +446,72 @@ async def run_batch_queries(
         original_provider = settings.llm_provider
         original_model = settings.llm_model
         
-        # Categorize queries by complexity for prioritized processing
-        inference_requests = []
-        simple_vector_requests = []
-        complex_vector_requests = []
-        
+        # Create tasks for all queries
+        tasks = []
         for req in requests:
-            if req.document_id == "00000000000000000000000000000000":
-                inference_requests.append(req)
-            elif not req.prompt.rules and req.prompt.type != "bool":
-                simple_vector_requests.append(req)
-            else:
-                complex_vector_requests.append(req)
-        
-        # Pre-allocate results array with the exact size needed
-        results = [None] * len(requests)
-        request_to_index = {id(req): i for i, req in enumerate(requests)}
-        
-        # Process priority queries first
-        priority_requests = inference_requests + simple_vector_requests
-        remaining_requests = complex_vector_requests
-        
-        if priority_requests:
-            # Prepare inference tasks
-            inference_tasks = []
-            for req in inference_requests:
-                # Configure LLM service if custom model is specified
-                if req.prompt.llm_model:
-                    logger.info(f"📝 BATCH QUERY - Model: {req.prompt.llm_model}, Provider: {req.prompt.llm_provider or 'Auto-detected'}")
-                    
-                    # Create a copy of the settings to avoid modifying the global settings
-                    req_settings = Settings()
-                    req_settings.llm_model = req.prompt.llm_model
-                    req_settings.llm_provider = settings.llm_provider
-                    req_settings.portkey_api_key = settings.portkey_api_key
-                    req_settings.portkey_enabled = settings.portkey_enabled
-                    req_settings.openai_api_key = settings.openai_api_key
-                    
-                    # Configure LLM service with the request-specific settings
-                    current_llm = configure_llm_service(
-                        llm_service, 
-                        req_settings, 
-                        req.prompt.llm_model, 
-                        req.prompt.llm_provider
-                    )
-                    logger.info(f"✅ Batch query LLM configured - Provider: {req_settings.llm_provider}, Model: {req_settings.llm_model}")
-                else:
-                    current_llm = llm_service
-                
+            # Configure custom LLM if specified
+            custom_llm = llm_service
+            if req.prompt.llm_model:
+                custom_llm = configure_llm_service(
+                    llm_service,
+                    settings,
+                    req.prompt.llm_model,
+                    req.prompt.llm_provider
+                )
+            
+            # Create appropriate query task based on type
+            if req.prompt.type == "inference":
                 task = inference_query(
                     req.prompt.query,
                     req.prompt.rules,
+                    req.prompt.format or "str",
+                    custom_llm
+                )
+            else:
+                # Regular document-based query
+                task = process_query_with_retry(
                     req.prompt.type,
-                    current_llm,
+                    req.prompt.query,
+                    req.document_id,
+                    req.prompt.rules,
+                    req.prompt.format or "str", 
+                    custom_llm,
+                    vector_db_service,
+                    document_service=document_service
                 )
-                inference_tasks.append((req, task))
             
-            # Prepare simple vector query parameters
-            simple_vector_params = []
-            for req in simple_vector_requests:
-                simple_vector_params.append({
-                    "query_type": "simple_vector",
-                    "query": req.prompt.query,
-                    "document_id": req.document_id,
-                    "rules": req.prompt.rules,
-                    "format": req.prompt.type,
-                    "_original_req": req,
-                })
-            
-            # Execute inference queries
-            if inference_tasks:
-                for req, task in inference_tasks:
-                    try:
-                        result = await task
-                        idx = request_to_index[id(req)]
-                        results[idx] = create_response_from_result(req, result)
-                    except Exception as e:
-                        logger.error(f"Error in inference query: {str(e)}")
-                        idx = request_to_index[id(req)]
-                        results[idx] = create_fallback_response(req)
-            
-            # Execute simple vector queries
-            if simple_vector_params:
+            tasks.append((req, task))
+        
+        # Execute all tasks in parallel with a semaphore to limit concurrency
+        results = [None] * len(requests)
+        
+        # Process queries with some concurrency control
+        semaphore = asyncio.Semaphore(5)  # Limit to 5 concurrent queries
+        
+        async def process_query_with_semaphore(index, req, task):
+            async with semaphore:
                 try:
-                    vector_results = await process_queries_in_parallel(
-                        simple_vector_params, llm_service, vector_db_service
-                    )
-                    
-                    # Map results back to original indices
-                    for i, result in enumerate(vector_results):
-                        req = simple_vector_params[i]["_original_req"]
-                        idx = request_to_index[id(req)]
-                        results[idx] = create_response_from_result(req, result)
+                    result = await task
+                    return index, result
                 except Exception as e:
-                    for param in simple_vector_params:
-                        req = param["_original_req"]
-                        idx = request_to_index[id(req)]
-                        results[idx] = create_fallback_response(req)
+                    logger.error(f"Error processing query {index}: {str(e)}")
+                    return index, None
         
-        # Process remaining complex queries
-        if remaining_requests:
-            complex_params = []
-            for req in remaining_requests:
-                complex_params.append({
-                    "query_type": "hybrid",
-                    "query": req.prompt.query,
-                    "document_id": req.document_id,
-                    "rules": req.prompt.rules,
-                    "format": req.prompt.type,
-                    "_original_req": req,
-                })
-            
-            try:
-                complex_results = await process_queries_in_parallel(
-                    complex_params, llm_service, vector_db_service
-                )
-                
-                # Map results back to original indices
-                for i, result in enumerate(complex_results):
-                    req = complex_params[i]["_original_req"]
-                    idx = request_to_index[id(req)]
-                    results[idx] = create_response_from_result(req, result)
-            except Exception as e:
-                for param in complex_params:
-                    req = param["_original_req"]
-                    idx = request_to_index[id(req)]
-                    results[idx] = create_fallback_response(req)
+        # Create and gather all tasks
+        gather_tasks = [
+            process_query_with_semaphore(i, req, task) 
+            for i, (req, task) in enumerate(tasks)
+        ]
         
-        # Fill any remaining None values with fallbacks
-        for i, result in enumerate(results):
-            if result is None:
-                results[i] = create_fallback_response(requests[i])
+        # Execute all tasks and collect results
+        query_results = await asyncio.gather(*gather_tasks)
+        
+        # Process results
+        for index, result in query_results:
+            if result is not None:
+                results[index] = create_response_from_result(requests[index], result)
+            else:
+                results[index] = create_fallback_response(requests[index])
         
         elapsed = time.time() - start_time
         logger.info(f"Batch query processing completed in {elapsed:.2f}s")
@@ -545,32 +528,42 @@ async def run_batch_queries(
 
 
 def create_response_from_result(req: QueryRequestSchema, result: Any) -> QueryAnswerResponse:
-    """Create a QueryAnswerResponse from a query result."""
-    # Handle exceptions
-    if isinstance(result, Exception):
-        return create_fallback_response(req)
+    """
+    Create a response object from a query result.
     
-    # Convert to QueryResult if needed
-    if not isinstance(result, QueryResult):
-        try:
-            result = QueryResult(**result)
-        except Exception:
-            return create_fallback_response(req)
-    
-    # Create answer object
+    Parameters
+    ----------
+    req : QueryRequestSchema
+        The original query request
+    result : Any
+        The query result object
+        
+    Returns
+    -------
+    QueryAnswerResponse
+        The formatted response
+    """
+    # Handle the case where result might have the 'queued' attribute
+    processing = hasattr(result, 'queued') and result.queued
+
+    # Create answer with processing flag
     answer = QueryAnswer(
-        id=uuid.uuid4().hex,
+        id=str(uuid.uuid4()),
         document_id=req.document_id,
         prompt_id=req.prompt.id,
         answer=result.answer,
         type=req.prompt.type,
+        processing=processing
     )
     
-    # Create response
+    # Create response object
     return QueryAnswerResponse(
-        answer=answer,
-        chunks=result.chunks or [],
-        resolved_entities=result.resolved_entities or [],
+        query=req.prompt.query,
+        result=answer,
+        document_id=req.document_id,
+        retrieval_type=req.prompt.type,
+        chunks=[] if processing else [chunk.model_dump() for chunk in (result.chunks or [])],
+        resolved_entities=[] if processing else [entity.model_dump() for entity in (result.resolved_entities or [])]
     )
 
 
@@ -584,22 +577,25 @@ def create_fallback_response(req: QueryRequestSchema) -> QueryAnswerResponse:
     elif req.prompt.type.endswith("_array"):
         fallback_answer = []
     else:
-        fallback_answer = ""
+        fallback_answer = "Error processing query"
     
     # Create answer object
     answer = QueryAnswer(
-        id=uuid.uuid4().hex,
+        id=str(uuid.uuid4()),
         document_id=req.document_id,
         prompt_id=req.prompt.id,
         answer=fallback_answer,
         type=req.prompt.type,
     )
     
-    # Create response
+    # Create response with the new schema
     return QueryAnswerResponse(
-        answer=answer,
+        query=req.prompt.query,
+        result=answer,
+        document_id=req.document_id,
+        retrieval_type=req.prompt.type,
         chunks=[],
-        resolved_entities=[],
+        resolved_entities=[]
     )
 
 

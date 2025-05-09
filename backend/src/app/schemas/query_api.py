@@ -1,19 +1,19 @@
 """Query schemas for API requests and responses."""
 
-from typing import Any, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, validator
 
-from app.models.query_core import Chunk, FormatType, Rule
+from app.models.query_core import Chunk, FormatType, QueryType, Rule
 
 
 class ResolvedEntitySchema(BaseModel):
     """Schema for resolved entity transformations."""
 
-    original: Union[str, List[str]]
-    resolved: Union[str, List[str]]
-    source: dict[str, str]
-    entityType: str
+    original: Any
+    resolved: Any
+    source: Optional[Dict[str, str]] = None
+    entityType: Optional[str] = None
 
 
 class QueryPromptSchema(BaseModel):
@@ -22,8 +22,8 @@ class QueryPromptSchema(BaseModel):
     id: str
     entity_type: str
     query: str
-    type: FormatType
-    rules: list[Rule] = []
+    type: QueryType = "str"
+    rules: List[Rule] = []
     llm_model: Optional[str] = None     # gpt-4o, claude-3-5-sonnet, gemini-1.5-pro, etc.
     llm_provider: Optional[str] = None
     llm_virtual_key: Optional[str] = None
@@ -51,8 +51,10 @@ class QueryResult(BaseModel):
     """Query result schema."""
 
     answer: Any
-    chunks: List[Chunk]
-    resolved_entities: Optional[List[ResolvedEntitySchema]] = None
+    chunks: List[Chunk] = []
+    resolved_entities: List[ResolvedEntitySchema] = []
+    queued: bool = False
+    queued_query: Optional[Any] = None
 
 
 class QueryResponseSchema(BaseModel):
@@ -70,11 +72,12 @@ class QueryResponseSchema(BaseModel):
 class QueryAnswer(BaseModel):
     """Query answer model."""
 
-    id: str
-    document_id: str
-    prompt_id: str
-    answer: Optional[Union[int, str, bool, List[int], List[str]]]
-    type: str
+    id: Optional[str] = None
+    document_id: Optional[str] = None
+    prompt_id: Optional[str] = None
+    answer: Any
+    type: Optional[QueryType] = None
+    processing: bool = False  # Flag to indicate if document is still processing
     
     # Add a validator to ensure answer matches the specified type
     @validator('answer')
@@ -144,9 +147,13 @@ class QueryAnswer(BaseModel):
 class QueryAnswerResponse(BaseModel):
     """Query answer response model."""
 
-    answer: QueryAnswer
-    chunks: List[Chunk]
-    resolved_entities: Optional[List[ResolvedEntitySchema]] = None
+    query: str
+    result: QueryAnswer
+    document_id: str
+    retrieval_type: str
+    timing: Optional[Dict[str, float]] = None
+    chunks: List[Dict[str, Any]] = []
+    resolved_entities: List[Dict[str, Any]] = []
 
 
 # Type for search responses (used in service layer)
