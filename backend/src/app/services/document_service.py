@@ -8,6 +8,7 @@ import time
 import uuid
 import requests
 import aiofiles
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from langchain.schema import Document as LangchainDocument
@@ -48,9 +49,11 @@ class DocumentService:
             chunk_overlap=int(self.settings.chunk_overlap * 0.5),  # 50% less overlap
         )
         
-        # In-memory dictionary to track document processing status
-        # This will be lost on server restart - consider using a database for production
+        # Initialize the status storage
         self.document_statuses = {}
+        
+        # Load any saved statuses from disk
+        self._load_document_statuses()
 
     async def upload_document(
         self,
@@ -965,7 +968,7 @@ class DocumentService:
         """
         try:
             # Set initial status
-            self.document_statuses[document_id] = "processing"
+            self._update_document_status(document_id, "processing")
             logger.info(f"Starting background processing for document: {filename} ({document_id})")
             
             # Create a directory to store uploaded documents
@@ -973,7 +976,8 @@ class DocumentService:
             os.makedirs(documents_dir, exist_ok=True)
             
             # Save the file with a name based on the document ID
-            file_path = os.path.join(documents_dir, f"{document_id}{os.path.splitext(filename)[1]}")
+            file_extension = os.path.splitext(filename)[1] or ".pdf"  # Default to .pdf if no extension
+            file_path = os.path.join(documents_dir, f"{document_id}{file_extension}")
             logger.info(f"Saving document to: {file_path}")
             
             # Use async file operations to avoid blocking
@@ -987,7 +991,7 @@ class DocumentService:
                 
                 if not chunks:
                     logger.warning(f"No chunks were extracted from document: {filename}")
-                    self.document_statuses[document_id] = "completed"
+                    self._update_document_status(document_id, "completed")
                     return document_id  # Return the ID even if no chunks were extracted
                 
                 # Log the first chunk for debugging
@@ -1008,7 +1012,7 @@ class DocumentService:
                 
                 if not prepared_chunks:
                     logger.warning(f"No prepared chunks for document: {filename}")
-                    self.document_statuses[document_id] = "completed"
+                    self._update_document_status(document_id, "completed")
                     return document_id  # Return the ID even if no prepared chunks
                 
                 # Add file_path to each prepared chunk
@@ -1019,7 +1023,7 @@ class DocumentService:
                 logger.info(f"Upsert result: {result}")
                 
                 # Update document status to "completed"
-                self.document_statuses[document_id] = "completed"
+                self._update_document_status(document_id, "completed")
                 
                 logger.info(f"Background processing completed successfully for document: {filename} ({document_id})")
                 
@@ -1029,7 +1033,7 @@ class DocumentService:
             except Exception as e:
                 logger.error(f"Error processing document: {e}", exc_info=True)
                 # Update document status to "failed"
-                self.document_statuses[document_id] = "failed"
+                self._update_document_status(document_id, "failed")
                 
                 # Don't delete the file on error, so we can debug
                 return None
@@ -1037,12 +1041,84 @@ class DocumentService:
         except Exception as e:
             logger.error(f"Error in background processing for document: {filename} ({document_id}): {e}", exc_info=True)
             # Update document status to "failed"
-            self.document_statuses[document_id] = "failed"
+            self._update_document_status(document_id, "failed")
             return None
         finally:
             # Clean up temporary files here if needed
             # Note: You might want to keep files for debugging or retain them based on settings
             pass
+
+    def _update_document_status(self, document_id: str, status: str) -> None:
+        """
+        Update document status with explicit logging and persistence.
+        
+        Parameters
+        ----------
+        document_id : str
+            The document ID
+        status : str
+            The new status
+        """
+        old_status = self.document_statuses.get(document_id, "unknown")
+        self.document_statuses[document_id] = status
+        if old_status != status:
+            logger.info(f"Document {document_id} status changed: {old_status} → {status}")
+            # Save status to disk for persistence
+            self._save_document_statuses()
+        else:
+            logger.debug(f"Document {document_id} status remains: {status}")
+    
+    def _get_status_file_path(self) -> str:
+        """
+        Get the path to the status file.
+        
+        Returns
+        -------
+        str
+            The path to the status file
+        """
+        try:
+            # Create a directory for status storage
+            status_dir = os.path.join(tempfile.gettempdir(), "ai_grid_status")
+            os.makedirs(status_dir, exist_ok=True)
+            return os.path.join(status_dir, "document_statuses.json")
+        except Exception as e:
+            logger.error(f"Error creating status directory: {e}")
+            # Fall back to temp directory root
+            return os.path.join(tempfile.gettempdir(), "document_statuses.json")
+    
+    def _save_document_statuses(self) -> None:
+        """
+        Save document statuses to a file for persistence.
+        """
+        try:
+            status_file = self._get_status_file_path()
+            with open(status_file, 'w') as f:
+                json.dump(self.document_statuses, f)
+            logger.debug(f"Saved {len(self.document_statuses)} document statuses to {status_file}")
+        except Exception as e:
+            logger.error(f"Error saving document statuses: {e}")
+    
+    def _load_document_statuses(self) -> None:
+        """
+        Load document statuses from a file.
+        """
+        try:
+            status_file = self._get_status_file_path()
+            if os.path.exists(status_file):
+                with open(status_file, 'r') as f:
+                    loaded_statuses = json.load(f)
+                    # Validate loaded data
+                    valid_statuses = {
+                        doc_id: status for doc_id, status in loaded_statuses.items() 
+                        if status in ["processing", "completed", "failed"]
+                    }
+                    self.document_statuses = valid_statuses
+                    logger.info(f"Loaded {len(self.document_statuses)} document statuses from {status_file}")
+            else:
+                logger.info(f"No document status file found at {status_file}")
+        except Exception as e:
+            logger.error(f"Error loading document statuses: {e}")
 
     async def get_document_status(self, document_id: str) -> str:
         """
@@ -1062,18 +1138,54 @@ class DocumentService:
         try:
             # Check if we have a status for this document
             if document_id in self.document_statuses:
-                return self.document_statuses[document_id]
-                
-            # Check if document exists in vector database
-            chunks = await self.get_document_chunks(document_id)
+                status = self.document_statuses[document_id]
+                logger.info(f"Document {document_id} status found in tracking dictionary: {status}")
+                return status
             
-            # If we found chunks, the document exists and is completed
-            if chunks:
-                # Set status for future lookups
-                self.document_statuses[document_id] = "completed"
-                return "completed"
+            logger.info(f"Document {document_id} status not found in tracking dictionary, checking DB...")
+            
+            # Check if document exists in vector database by looking for chunks
+            try:
+                chunks = await self.get_document_chunks(document_id)
                 
-            # If we can't determine status, default to completed for backward compatibility
+                # If we found chunks, the document exists and is completed
+                if chunks and len(chunks) > 0:
+                    logger.info(f"Document {document_id} has {len(chunks)} chunks in DB, marking as completed")
+                    # Set status for future lookups
+                    self.document_statuses[document_id] = "completed"
+                    return "completed"
+                else:
+                    logger.info(f"Document {document_id} has no chunks in DB")
+            except Exception as chunk_error:
+                logger.warning(f"Error checking chunks for document {document_id}: {chunk_error}")
+            
+            # If we're here, we couldn't determine status from chunks
+            # Try to find any metadata for the document that might indicate it exists
+            try:
+                metadata = await self.fetch_document_metadata_by_id(document_id)
+                if metadata:
+                    logger.info(f"Document {document_id} has metadata, marking as completed")
+                    self.document_statuses[document_id] = "completed"
+                    return "completed"
+            except Exception as metadata_error:
+                logger.warning(f"Error checking metadata for document {document_id}: {metadata_error}")
+            
+            # Last attempt: check if the file physically exists
+            documents_dir = os.path.join(tempfile.gettempdir(), "ai_grid_documents")
+            potential_files = [
+                os.path.join(documents_dir, f"{document_id}.pdf"), 
+                os.path.join(documents_dir, f"{document_id}.docx"),
+                os.path.join(documents_dir, f"{document_id}.txt")
+            ]
+            
+            for file_path in potential_files:
+                if os.path.exists(file_path):
+                    logger.info(f"Document {document_id} file exists at {file_path}, assuming completed")
+                    self.document_statuses[document_id] = "completed"
+                    return "completed"
+            
+            # If we still can't determine, default to processing if we have any indication it existed
+            logger.info(f"Could not determine status for document {document_id}, defaulting to completed")
             return "completed"
         except Exception as e:
             logger.error(f"Error checking document status for {document_id}: {e}", exc_info=True)
