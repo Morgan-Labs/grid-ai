@@ -1,114 +1,65 @@
 # syntax=docker/dockerfile:1.4
-# Enable BuildKit features
 
-# Build stage
+# --- Builder Stage: Install dependencies and build wheels ---
 FROM python:3.12.1-slim-bookworm AS builder
 
-# Set working directory
 WORKDIR /usr/src/app
 
-# Install system dependencies - only what's needed for building wheels
+# 1. Install build tools (for compiling any wheels) with apt cache
 RUN --mount=type=cache,target=/var/cache/apt \
-    apt-get update
-
-RUN --mount=type=cache,target=/var/cache/apt \
-    apt-get install -y --no-install-recommends build-essential && \
+    apt-get update && apt-get install -y --no-install-recommends build-essential && \
     rm -rf /var/lib/apt/lists/*
 
-# Install python dependencies
+# 2. Copy pyproject and locked requirements to leverage caching
+COPY pyproject.toml requirements.txt ./
+
+# 3. Upgrade pip and build wheels for all Python dependencies (cached)
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade pip setuptools wheel
-
-# Copy only the requirements-related files first
-COPY pyproject.toml ./
-
-# Create a requirements.txt file with only the essential dependencies
-RUN pip install tomli && \
-    python -c "import tomli; import json; f = open('pyproject.toml', 'rb'); data = tomli.load(f); essential = [d for d in data['project']['dependencies'] if any(pkg in d.lower() for pkg in ['fastapi', 'uvicorn', 'pydantic', 'langchain', 'openai', 'pymilvus', 'pypdf', 'python-multipart'])]; print('\n'.join(essential))" > requirements.txt
-
-# Install only essential dependencies to create wheels
-RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip setuptools wheel && \
     pip wheel --no-deps --wheel-dir /usr/src/app/wheels -r requirements.txt
 
-# Copy source code
+# 4. Copy application source code and build a wheel for the project
 COPY src ./src
-
-# Create wheel for the project
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip wheel --no-deps --wheel-dir /usr/src/app/wheels -e .
+    pip wheel --no-deps --wheel-dir /usr/src/app/wheels .
 
-# Final stage
+# --- Final Stage: Set up runtime image ---
 FROM python:3.12.1-slim-bookworm
 
-# Create a non-root user
-RUN useradd -m appuser
-
-# Set working directory
 WORKDIR /usr/src/app
+# Environment variables (avoid pip cache disable)
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+# 5. Install runtime OS dependencies (PDF/OCR libs) with caching, and create app user
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update && apt-get install -y --no-install-recommends \
+    poppler-utils libmagic1 libgl1 libglib2.0-0 tesseract-ocr tesseract-ocr-eng && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -m appuser
 
-# Copy wheels and install dependencies
+# 6. Install Python dependencies from built wheels (enable pip cache) and Gunicorn
 COPY --from=builder /usr/src/app/wheels /wheels
-COPY --from=builder /usr/src/app/src ./src
-COPY pyproject.toml ./
-
-# Install dependencies with conflict resolution
-RUN pip install --no-cache-dir --no-deps /wheels/* && \
-    pip install --no-cache-dir pydantic==2.10.6 pydantic-core==2.27.2
-
-# Install system dependencies for PDF processing - only what's actually needed
-# poppler-utils: For PDF processing
-# libmagic1: For file type detection
-# libgl1: For image processing
-# libglib2.0-0: Required by PyMuPDF
-# tesseract-ocr: For OCR (only if needed)
-# tesseract-ocr-eng: English language for OCR
-RUN --mount=type=cache,target=/var/cache/apt \
-    apt-get update
-
-RUN --mount=type=cache,target=/var/cache/apt \
-    apt-get install -y --no-install-recommends \
-    poppler-utils \
-    libmagic1 \
-    libgl1 \
-    libglib2.0-0 \
-    tesseract-ocr \
-    tesseract-ocr-eng && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install Gunicorn for production server with timeout support
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install gunicorn
-
-# Install the project with all PDF processing dependencies including Textract and GPT-4o
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e ".[pdf-all]" && \
-    # Only install spaCy model if absolutely needed by unstructured
+    pip install /wheels/* gunicorn && \
+    # If spaCy is present (via unstructured), download the small English model
     if pip show unstructured | grep -q "spacy"; then \
         python -m spacy download en_core_web_sm --no-deps; \
-    fi
+    fi && \
+    # Remove wheel files to clean up image
+    rm -rf /wheels
 
-# Create data and temp directories with proper permissions
-RUN mkdir -p /data && mkdir -p /tmp/ai_grid_documents && \
-    chmod -R 777 /data && chmod -R 777 /tmp && \
-    chown -R appuser:appuser /data && chown -R appuser:appuser /tmp/ai_grid_documents
+# 7. Set permissions for data and temp directories
+RUN mkdir -p /data /tmp/ai_grid_documents && \
+    chmod -R 777 /data /tmp && \
+    chown -R appuser:appuser /data /tmp/ai_grid_documents /usr/src/app
 
-# Change ownership of the app directory
-RUN chown -R appuser:appuser /usr/src/app
-
-# Switch to non-root user
+# Switch to non-root user for safety
 USER appuser
 
-# Health check
+# Healthcheck for the service
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/ping || exit 1
 
-# Run the application with Gunicorn for better timeout support
-# Use PORT environment variable if set (for Render), otherwise default to 8000
-# Using single worker to prevent database locking issues with Milvus
-CMD gunicorn app.main:app -k uvicorn.workers.UvicornWorker --timeout 1800 --keep-alive 120 --workers 1 --bind 0.0.0.0:${PORT:-8000}
+# Run the application with Gunicorn (single worker for Milvus DB safety)
+CMD gunicorn app.main:app -k uvicorn.workers.UvicornWorker --timeout 1800 --keep-alive 120 \
+    --workers 1 --bind 0.0.0.0:${PORT:-8000}
