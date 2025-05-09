@@ -5,13 +5,12 @@ FROM python:3.12.1-slim-bookworm AS builder
 WORKDIR /usr/src/app
 
 # 1) Install build tools with cached apt lists & archives, clearing all locks
-RUN --mount=type=cache,id=apt-lists,target=/var/lib/apt/lists \
-    --mount=type=cache,id=apt-cache,target=/var/cache/apt/archives \
+RUN --mount=type=cache,id=apt-cache,target=/var/cache/apt/archives \
     rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock \
-            /var/cache/apt/archives/lock && \
+          /var/cache/apt/archives/lock && \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        build-essential && \
+      build-essential && \
     rm -rf /var/lib/apt/lists/*
 
 # 2) Copy only lockfiles to leverage pip caching
@@ -37,14 +36,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # 6) Install runtime OS libs (poppler, tesseract, etc.) with cached apt & no locks
-RUN --mount=type=cache,id=apt-lists,target=/var/lib/apt/lists \
-    --mount=type=cache,id=apt-cache,target=/var/cache/apt/archives \
+RUN --mount=type=cache,id=apt-cache,target=/var/cache/apt/archives \
     rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock \
-            /var/cache/apt/archives/lock && \
+          /var/cache/apt/archives/lock && \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        poppler-utils libmagic1 libgl1 libglib2.0-0 \
-        tesseract-ocr tesseract-ocr-eng && \
+      poppler-utils libmagic1 libgl1 libglib2.0-0 \
+      tesseract-ocr tesseract-ocr-eng && \
     rm -rf /var/lib/apt/lists/*
 
 # 7) Install all pre-built wheels + Gunicorn
