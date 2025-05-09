@@ -383,7 +383,7 @@ export const useStore = create<Store>()(
 
       // Updated fillRow to accept an options object
       fillRow: async (id: string, file: File, options = { showNotification: true }) => {
-        const { activeTableId, getTable, editTable } = get();
+        const { activeTableId, editTable } = get();
         try {
           const document = await uploadFile(file);
           
@@ -451,9 +451,6 @@ export const useStore = create<Store>()(
           
           // Create rows for each file
           for (let i = 0; i < files.length; i++) {
-            // Rename to avoid unused variable
-            const _ = files[i];
-            
             let id;
             // If we have an existing empty row, use it
             if (firstEmptyIndex !== -1 && i === 0) {
