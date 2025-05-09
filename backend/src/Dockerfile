@@ -5,9 +5,11 @@ FROM python:3.12.1-slim-bookworm AS builder
 
 WORKDIR /usr/src/app
 
-# 1. Install build tools (for compiling any wheels) with apt cache
-RUN --mount=type=cache,target=/var/cache/apt \
-    apt-get update && apt-get install -y --no-install-recommends build-essential && \
+# 1. Install build tools (for compiling any wheels) with cached apt archives
+RUN --mount=type=cache,target=/var/cache/apt/archives \
+    rm -f /var/cache/apt/archives/lock && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends build-essential && \
     rm -rf /var/lib/apt/lists/*
 
 # 2. Copy pyproject and locked requirements to leverage caching
@@ -30,10 +32,12 @@ WORKDIR /usr/src/app
 # Environment variables (avoid pip cache disable)
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# 5. Install runtime OS dependencies (PDF/OCR libs) with caching, and create app user
-RUN --mount=type=cache,target=/var/cache/apt \
-    apt-get update && apt-get install -y --no-install-recommends \
-    poppler-utils libmagic1 libgl1 libglib2.0-0 tesseract-ocr tesseract-ocr-eng && \
+# 5. Install runtime OS deps (PDF/OCR libs) with cached apt archives
+RUN --mount=type=cache,target=/var/cache/apt/archives \
+    rm -f /var/cache/apt/archives/lock && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+      poppler-utils libmagic1 libgl1 libglib2.0-0 tesseract-ocr tesseract-ocr-eng && \
     rm -rf /var/lib/apt/lists/* && \
     useradd -m appuser
 
