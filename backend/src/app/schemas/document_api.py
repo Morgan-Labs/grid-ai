@@ -18,17 +18,21 @@ class DocumentCreateSchema(BaseModel):
     ]  # This ensures page_count is a non-negative integer
 
 
-class DocumentResponseSchema(Document):
-    """Schema for document response, inheriting from the Document model."""
+class DocumentResponseSchema(BaseModel):
+    """Schema for document response."""
 
-    pass
+    id: str
+    name: str
+    author: str
+    tag: str
+    page_count: int
+    status: str = "completed"
 
 
 class DeleteDocumentResponseSchema(BaseModel):
     """Schema for delete document response."""
 
     id: str
-    status: str
     message: str
 
 

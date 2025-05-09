@@ -7,6 +7,7 @@ import tempfile
 import time
 import uuid
 import requests
+import aiofiles
 from typing import Any, Dict, List, Optional, Tuple
 
 from langchain.schema import Document as LangchainDocument
@@ -34,17 +35,46 @@ class DocumentService:
         self.llm_service = llm_service
         self.settings = settings
         self.loader_factory = LoaderFactory()
-        self.splitter = RecursiveCharacterTextSplitter(
+        
+        # Use larger chunks for big documents to reduce processing time
+        self.default_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.settings.chunk_size,
             chunk_overlap=self.settings.chunk_overlap,
         )
+        
+        # Larger chunk size, smaller overlap for big documents
+        self.large_doc_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.settings.chunk_size * 3,  # 3x larger chunks
+            chunk_overlap=int(self.settings.chunk_overlap * 0.5),  # 50% less overlap
+        )
+        
+        # In-memory dictionary to track document processing status
+        # This will be lost on server restart - consider using a database for production
+        self.document_statuses = {}
 
     async def upload_document(
         self,
         filename: str,
         file_content: bytes,
     ) -> Optional[str]:
-        """Upload a document."""
+        """
+        Upload a document.
+        
+        WARNING: This method performs synchronous processing which may cause timeouts with large documents.
+        For production use with large files, consider using process_document_background method instead.
+        
+        Parameters
+        ----------
+        filename : str
+            The name of the document to upload.
+        file_content : bytes
+            The content of the document to upload.
+            
+        Returns
+        -------
+        Optional[str]
+            The document ID if successful, None otherwise.
+        """
         try:
             # Generate a document ID
             document_id = self._generate_document_id()
@@ -126,6 +156,16 @@ class DocumentService:
                 metadata={"page": 1, "source": file_path, "error": "Content extraction failed"}
             )]
 
+        # Check file size to determine which splitter to use
+        file_size = os.path.getsize(file_path)
+        large_file = file_size > 5_000_000  # 5MB threshold
+        
+        if large_file:
+            logger.info(f"Using larger chunk size for document ({file_size} bytes)")
+            splitter = self.large_doc_splitter
+        else:
+            splitter = self.default_splitter
+
         # Split the document into chunks using a thread pool to avoid blocking
         chunk_start = time.time()
         loop = asyncio.get_event_loop()
@@ -148,7 +188,7 @@ class DocumentService:
             # Create a task for each batch
             task = loop.run_in_executor(
                 None, 
-                lambda b=batch: self.splitter.split_documents(b)
+                lambda b=batch: splitter.split_documents(b)
             )
             chunk_tasks.append(task)
         
@@ -287,7 +327,29 @@ class DocumentService:
     
     async def _load_scanned_pdf(self, file_path: str, original_loader_type: str) -> List[LangchainDocument]:
         """Load a scanned PDF with optimized fallback chain."""
-        # For scanned documents, try Unstructured first
+        # Try GPT-4o loader first for scanned documents
+        try:
+            logger.info("Smart fallback: Trying GPT-4o loader first for scanned document")
+            self.settings.loader = "gpt4o_pdf"
+            gpt4o_loader = self.loader_factory.create_loader(self.settings)
+            
+            if gpt4o_loader is not None:
+                documents = await gpt4o_loader.load(file_path)
+                
+                if documents and any(doc.page_content.strip() for doc in documents):
+                    logger.info("Successfully loaded scanned document with GPT-4o")
+                    self.settings.loader = original_loader_type
+                    return documents
+                else:
+                    logger.warning("GPT-4o loader returned empty content for scanned document")
+            else:
+                logger.warning("GPT-4o loader could not be created")
+        except Exception as e:
+            logger.error(f"GPT-4o loader failed for scanned document: {e}")
+        finally:
+            self.settings.loader = original_loader_type
+        
+        # Then try Unstructured as fallback
         try:
             logger.info("Smart fallback: Trying Unstructured loader for scanned document")
             self.settings.loader = "unstructured"
@@ -308,68 +370,7 @@ class DocumentService:
             logger.error(f"Unstructured loader failed for scanned document: {e}")
         finally:
             self.settings.loader = original_loader_type
-        
-        # Then try Textract - COMMENTED OUT DUE TO EXPIRED CREDENTIALS
-        # try:
-        #     logger.info("Smart fallback: Trying Textract loader for scanned document")
-        #     self.settings.loader = "textract"
-        #     textract_loader = self.loader_factory.create_loader(self.settings)
-        #     
-        #     if textract_loader is not None:
-        #         try:
-        #             documents = await textract_loader.load(file_path)
-        #             
-        #             if documents and any(doc.page_content.strip() for doc in documents):
-        #                 logger.info("Successfully loaded scanned document with Textract")
-        #                 self.settings.loader = original_loader_type
-        #                 return documents
-        #             else:
-        #                 logger.warning("Textract loader returned empty content for scanned document")
-        #         except ValueError as ve:
-        #             # Check for the special error code for expired AWS credentials
-        #             if str(ve) == "AWS_CREDENTIALS_EXPIRED":
-        #                 logger.warning("AWS credentials have expired, skipping Textract and trying GPT-4o")
-        #                 # Skip to GPT-4o immediately
-        #                 raise ValueError("AWS_CREDENTIALS_EXPIRED")
-        #             else:
-        #                 # Re-raise other ValueError exceptions
-        #                 raise
-        #     else:
-        #         logger.warning("Textract loader could not be created")
-        # except ValueError as ve:
-        #     # Special handling for expired AWS credentials
-        #     if str(ve) == "AWS_CREDENTIALS_EXPIRED":
-        #         logger.warning("Skipping Textract due to expired AWS credentials")
-        #         # Continue to GPT-4o
-        #     else:
-        #         logger.error(f"Textract loader failed with ValueError: {ve}")
-        # except Exception as e:
-        #     logger.error(f"Textract loader failed for scanned document: {e}")
-        # finally:
-        #     self.settings.loader = original_loader_type
-        
-        # Finally try GPT-4o as last resort
-        try:
-            logger.info("Smart fallback: Trying GPT-4o loader for scanned document")
-            self.settings.loader = "gpt4o_pdf"
-            gpt4o_loader = self.loader_factory.create_loader(self.settings)
             
-            if gpt4o_loader is not None:
-                documents = await gpt4o_loader.load(file_path)
-                
-                if documents and any(doc.page_content.strip() for doc in documents):
-                    logger.info("Successfully loaded scanned document with GPT-4o")
-                    self.settings.loader = original_loader_type
-                    return documents
-                else:
-                    logger.warning("GPT-4o loader returned empty content for scanned document")
-            else:
-                logger.warning("GPT-4o loader could not be created")
-        except Exception as e:
-            logger.error(f"GPT-4o loader failed for scanned document: {e}")
-        finally:
-            self.settings.loader = original_loader_type
-        
         # If all loaders failed, return an empty list
         logger.error(f"All loaders failed for scanned document: {file_path}")
         return []
@@ -931,3 +932,149 @@ class DocumentService:
         except Exception as e:
             logger.error(f"Error retrieving document chunks: {e}", exc_info=True)
             raise
+
+    async def process_document_background(
+        self,
+        file_content: bytes,
+        filename: str,
+        content_type: str,
+        document_id: str,
+    ) -> Optional[str]:
+        """
+        Process a document in the background.
+        
+        This method is designed to be called by FastAPI's BackgroundTasks,
+        handling the entire document processing flow from saving the file
+        to vectorizing its content.
+        
+        Parameters
+        ----------
+        file_content : bytes
+            Binary content of the file
+        filename : str
+            Name of the file
+        content_type : str
+            MIME type of the file
+        document_id : str
+            Pre-generated document ID
+            
+        Returns
+        -------
+        Optional[str]
+            The document ID if successful, None otherwise
+        """
+        try:
+            # Set initial status
+            self.document_statuses[document_id] = "processing"
+            logger.info(f"Starting background processing for document: {filename} ({document_id})")
+            
+            # Create a directory to store uploaded documents
+            documents_dir = os.path.join(tempfile.gettempdir(), "ai_grid_documents")
+            os.makedirs(documents_dir, exist_ok=True)
+            
+            # Save the file with a name based on the document ID
+            file_path = os.path.join(documents_dir, f"{document_id}{os.path.splitext(filename)[1]}")
+            logger.info(f"Saving document to: {file_path}")
+            
+            # Use async file operations to avoid blocking
+            async with aiofiles.open(file_path, 'wb') as f:
+                await f.write(file_content)
+            
+            # Process the document
+            try:
+                chunks = await self._process_document(file_path)
+                logger.info(f"Processed document into {len(chunks)} chunks")
+                
+                if not chunks:
+                    logger.warning(f"No chunks were extracted from document: {filename}")
+                    self.document_statuses[document_id] = "completed"
+                    return document_id  # Return the ID even if no chunks were extracted
+                
+                # Log the first chunk for debugging
+                if chunks:
+                    logger.info(f"First chunk sample: {chunks[0].page_content[:100]}...")
+                
+                # Add the file path to the first chunk's metadata
+                for chunk in chunks:
+                    chunk.metadata["file_path"] = file_path
+                
+                # Use the parent_run_id from the traceable decorator
+                parent_run_id = None  # The traceable decorator will handle this
+                
+                prepared_chunks = await self.vector_db_service.prepare_chunks(
+                    document_id, chunks, parent_run_id
+                )
+                logger.info(f"Prepared {len(prepared_chunks)} chunks for vector storage")
+                
+                if not prepared_chunks:
+                    logger.warning(f"No prepared chunks for document: {filename}")
+                    self.document_statuses[document_id] = "completed"
+                    return document_id  # Return the ID even if no prepared chunks
+                
+                # Add file_path to each prepared chunk
+                for chunk in prepared_chunks:
+                    chunk["file_path"] = file_path
+                
+                result = await self.vector_db_service.upsert_vectors(prepared_chunks, parent_run_id)
+                logger.info(f"Upsert result: {result}")
+                
+                # Update document status to "completed"
+                self.document_statuses[document_id] = "completed"
+                
+                logger.info(f"Background processing completed successfully for document: {filename} ({document_id})")
+                
+                # Return the document ID to indicate success
+                return document_id
+                
+            except Exception as e:
+                logger.error(f"Error processing document: {e}", exc_info=True)
+                # Update document status to "failed"
+                self.document_statuses[document_id] = "failed"
+                
+                # Don't delete the file on error, so we can debug
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in background processing for document: {filename} ({document_id}): {e}", exc_info=True)
+            # Update document status to "failed"
+            self.document_statuses[document_id] = "failed"
+            return None
+        finally:
+            # Clean up temporary files here if needed
+            # Note: You might want to keep files for debugging or retain them based on settings
+            pass
+
+    async def get_document_status(self, document_id: str) -> str:
+        """
+        Get the current processing status of a document.
+        
+        Parameters
+        ----------
+        document_id : str
+            The ID of the document to check.
+            
+        Returns
+        -------
+        str
+            The document status: "processing", "completed", or "failed"
+            Returns "completed" if status is unknown (for backward compatibility)
+        """
+        try:
+            # Check if we have a status for this document
+            if document_id in self.document_statuses:
+                return self.document_statuses[document_id]
+                
+            # Check if document exists in vector database
+            chunks = await self.get_document_chunks(document_id)
+            
+            # If we found chunks, the document exists and is completed
+            if chunks:
+                # Set status for future lookups
+                self.document_statuses[document_id] = "completed"
+                return "completed"
+                
+            # If we can't determine status, default to completed for backward compatibility
+            return "completed"
+        except Exception as e:
+            logger.error(f"Error checking document status for {document_id}: {e}", exc_info=True)
+            return "completed"  # Default to completed on error

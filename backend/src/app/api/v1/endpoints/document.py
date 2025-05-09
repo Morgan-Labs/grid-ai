@@ -5,7 +5,7 @@ import logging
 import time
 from typing import List, Dict, Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, Request, Response, Body
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status, Request, Response, Body, BackgroundTasks
 
 from app.core.dependencies import get_document_service
 from app.models.document import Document
@@ -114,16 +114,17 @@ async def options_batch_fetch_by_ids_endpoint(
 @router.post(
     "",
     response_model=DocumentResponseSchema,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def upload_document_endpoint(
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     document_service: DocumentService = Depends(get_document_service),
 ) -> DocumentResponseSchema:
     """
-    Upload a document and process it.
+    Upload a document and process it in the background.
 
     Parameters
     ----------
@@ -131,11 +132,13 @@ async def upload_document_endpoint(
         The file to be uploaded and processed.
     document_service : DocumentService
         The document service for processing the file.
+    background_tasks : BackgroundTasks
+        FastAPI background tasks for async processing.
 
     Returns
     -------
     DocumentResponse
-        The processed document information.
+        The document information with a processing status.
 
     Raises
     ------
@@ -172,31 +175,31 @@ async def upload_document_endpoint(
         # Log the file size
         logger.info(f"Processing file of size: {len(file_content)} bytes")
         
-        # Process document
-        process_start = time.time()
-        document_id = await document_service.upload_document(
-            file.filename, file_content
+        # Generate document ID
+        document_id = document_service._generate_document_id()
+        logger.info(f"Created document_id: {document_id}")
+        
+        # Add document processing to background tasks instead of waiting for it to complete
+        background_tasks.add_task(
+            document_service.process_document_background,
+            file_content=file_content,
+            filename=file.filename,
+            content_type=file.content_type,
+            document_id=document_id
         )
-        process_time = time.time() - process_start
-        logger.info(f"Document processing completed in {process_time:.2f} seconds")
-
-        if document_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="An error occurred while processing the document",
-            )
-
-        # TODO: Fetch actual document details from a database
+        
+        # Return immediately with the document ID
         document = Document(
             id=document_id,
             name=file.filename,
             author="author_name",  # TODO: Determine this dynamically
             tag="document_tag",  # TODO: Determine this dynamically
             page_count=10,  # TODO: Determine this dynamically
+            status="processing"  # Indicate that document is still being processed
         )
         
         total_time = time.time() - start_time
-        logger.info(f"Total upload time: {total_time:.2f} seconds")
+        logger.info(f"Document upload accepted in {total_time:.2f} seconds, processing in background")
         return DocumentResponseSchema(**document.model_dump())
 
     except ValueError as ve:
@@ -214,16 +217,17 @@ async def upload_document_endpoint(
 @router.post(
     "/batch",
     response_model=BatchUploadResponseSchema,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def batch_upload_documents_endpoint(
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     document_service: DocumentService = Depends(get_document_service),
 ) -> BatchUploadResponseSchema:
     """
-    Upload multiple documents in parallel and process them.
+    Upload multiple documents and process them in the background.
 
     Parameters
     ----------
@@ -231,11 +235,13 @@ async def batch_upload_documents_endpoint(
         The files to be uploaded and processed.
     document_service : DocumentService
         The document service for processing the files.
+    background_tasks : BackgroundTasks
+        FastAPI background tasks for async processing.
 
     Returns
     -------
     BatchUploadResponseSchema
-        Information about the processed documents.
+        Information about the uploaded documents.
 
     Raises
     ------
@@ -258,51 +264,42 @@ async def batch_upload_documents_endpoint(
     logger.info(f"Batch upload endpoint received {len(files)} files")
     start_time = time.time()
 
-    # Read all files first to avoid timeout issues
-    file_data = []
+    # Read all files first
+    documents = []
     for file in files:
         if file.filename:
             try:
+                # Read file content
                 content = await file.read()
-                file_data.append((file.filename, content))
+                
+                # Generate document ID
+                document_id = document_service._generate_document_id()
+                
+                # Add processing to background tasks
+                background_tasks.add_task(
+                    document_service.process_document_background,
+                    file_content=content,
+                    filename=file.filename,
+                    content_type=file.content_type,
+                    document_id=document_id
+                )
+                
+                # Create document object
+                document = Document(
+                    id=document_id,
+                    name=file.filename,
+                    author="author_name",
+                    tag="document_tag",
+                    page_count=10,
+                    status="processing"  # Indicate that document is still being processed
+                )
+                documents.append(document)
+                
             except Exception as e:
                 logger.error(f"Error reading file {file.filename}: {str(e)}")
     
-    logger.info(f"Read {len(file_data)} files, starting processing")
-    
-    # Process files in parallel with concurrency control
-    # Limit concurrency to avoid overwhelming the system
-    semaphore = asyncio.Semaphore(10)  # Process up to 10 files concurrently
-    
-    async def process_file(filename: str, content: bytes):
-        async with semaphore:
-            try:
-                document_id = await document_service.upload_document(filename, content)
-                
-                if document_id:
-                    return Document(
-                        id=document_id,
-                        name=filename,
-                        author="author_name",
-                        tag="document_tag",
-                        page_count=10,
-                    )
-                return None
-            except Exception as e:
-                logger.error(f"Error processing file {filename}: {str(e)}")
-                return None
-
-    # Create tasks for all files
-    tasks = [process_file(filename, content) for filename, content in file_data]
-    
-    # Process all files with controlled concurrency
-    results = await asyncio.gather(*tasks)
-    
-    # Filter out None results
-    documents = [doc for doc in results if doc is not None]
-    
     total_time = time.time() - start_time
-    logger.info(f"Batch upload completed in {total_time:.2f} seconds, processed {len(documents)}/{len(file_data)} documents")
+    logger.info(f"Batch upload request accepted in {total_time:.2f} seconds, processing {len(documents)} files in background")
     
     return BatchUploadResponseSchema(
         documents=[DocumentResponseSchema(**doc.model_dump()) for doc in documents],
@@ -788,4 +785,58 @@ async def preview_document_text(
         logger.error(f"Unexpected error in preview_document_text: {e}", exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"An unexpected error occurred: {str(e)}"
+        )
+
+
+@router.get(
+    "/{document_id}/status",
+    status_code=status.HTTP_200_OK,
+)
+async def get_document_status_endpoint(
+    request: Request,
+    response: Response,
+    document_id: str,
+    document_service: DocumentService = Depends(get_document_service),
+):
+    """
+    Get the current processing status of a document.
+    
+    Parameters
+    ----------
+    document_id : str
+        The ID of the document to check status.
+    document_service : DocumentService
+        The document service for checking document status.
+        
+    Returns
+    -------
+    dict
+        The status of the document ("processing", "completed", or "failed").
+        
+    Raises
+    ------
+    HTTPException
+        If an error occurs while checking document status.
+    """
+    # Ensure CORS headers are present
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
+    
+    logger.info(f"Checking status for document ID: {document_id}")
+    
+    try:
+        # Get status from document service
+        document_status = await document_service.get_document_status(document_id)
+        logger.info(f"Document {document_id} status: {document_status}")
+        
+        return {"status": document_status}
+    except Exception as e:
+        logger.error(f"Error checking document status: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred: {str(e)}",
         )

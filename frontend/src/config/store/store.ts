@@ -25,7 +25,7 @@ import {
 } from "./store.utils";
 import { AnswerTableRow, ResolvedEntity, SourceData, Store } from "./store.types";
 // Import API_ENDPOINTS
-import { ApiError, runBatchQueries, uploadFile, API_ENDPOINTS } from "../api";
+import { runBatchQueries, uploadFile, API_ENDPOINTS, checkDocumentStatus } from "../api";
 import { AuthError, login as apiLogin, verifyToken } from "../../services/api/auth";
 import { 
   saveTableState as apiSaveTableState, 
@@ -42,6 +42,7 @@ export const useStore = create<Store>()(
       ...getInitialData(),
       activePopoverId: null,
       documentPreviews: {}, // Initialize empty document previews
+      documents: {}, // Track uploaded documents and their statuses
       isLoading: false, // Add isLoading to initial state
       auth: {
         token: null,
@@ -385,6 +386,15 @@ export const useStore = create<Store>()(
         const { activeTableId, getTable, editTable } = get();
         try {
           const document = await uploadFile(file);
+          
+          // Add document to tracked documents
+          get().addDocument(document);
+          
+          // Start polling for status updates if document is processing
+          if (document.status === 'processing') {
+            get().pollDocumentStatus(document.id);
+          }
+          
           const sourceData: SourceData = {
             type: "document",
             document
@@ -392,9 +402,11 @@ export const useStore = create<Store>()(
           
           // Update only the sourceData, preserving existing cells
           editTable(activeTableId, {
-            rows: where(getTable(activeTableId).rows, r => r.id === id, {
-              sourceData
-            })
+            rows: where(get().getTable(activeTableId).rows, r => r.id === id, row => ({
+              ...row, // Keep existing properties
+              sourceData, // Update the sourceData
+              cells: {} // Reset cells
+            }))
           });
           
           // Pass option to suppress the "Processing in progress" notification from rerunCells
@@ -404,73 +416,56 @@ export const useStore = create<Store>()(
           if (options.showNotification) {
             notifications.show({
               title: 'Document uploaded',
-              message: `Successfully uploaded ${document.name}`,
+              message: `Successfully uploaded ${document.name}${document.status === 'processing' ? ' (processing in background)' : ''}`,
               color: 'green'
             });
           }
+          
+          return document;
         } catch (error) {
           console.error('Error uploading document:', error);
-          
-          if (error instanceof ApiError) {
-            notifications.show({
-              title: 'Upload failed',
-              message: error.message,
-              color: 'red'
-            });
-          } else {
-            notifications.show({
-              title: 'Upload failed',
-              message: error instanceof Error ? error.message : 'Unknown error',
-              color: 'red'
-            });
-          }
+          notifications.show({
+            title: 'Upload failed',
+            message: error instanceof Error ? error.message : 'Unknown error',
+            color: 'red'
+          });
+          return null;
         }
       },
 
-      fillRows: async files => {
-        const { activeTableId, getTable, editTable } = get();
-        editTable(activeTableId, { uploadingFiles: true });
+      // Fill multiple rows, each with a file
+      fillRows: async (files: File[]) => {
+        const { activeTableId, editTable } = get();
+        
+        if (!activeTableId || !files.length) return;
         
         let successCount = 0;
         let errorCount = 0;
+        const { rows } = get().getTable(activeTableId);
+        const rowIds: string[] = [];
+        const placeholderRows: AnswerTableRow[] = [];
         
         try {
-          // Create a placeholder row for each file immediately
-          const placeholderRows: AnswerTableRow[] = [];
-          const rowIds: string[] = [];
+          // Find the first available empty row
+          let firstEmptyIndex = rows.findIndex(r => !r.sourceData);
           
-          // Find existing empty rows first
-          const rows = getTable(activeTableId).rows;
-          const emptyRows = rows.filter(r => !r.sourceData);
-          
-          // Create placeholders for files
+          // Create rows for each file
           for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            let id: string;
+            // Rename to avoid unused variable
+            const _ = files[i];
             
-            if (i < emptyRows.length) {
-              // Use existing empty row
-              id = emptyRows[i].id;
-              editTable(activeTableId, {
-                rows: where(rows, r => r.id === id, {
-                  sourceData: { 
-                    type: "loading", 
-                    name: file.name 
-                  } as any,
-                  cells: {}
-                })
-              });
-            } else {
-              // Create new row with loading state
+            let id;
+            // If we have an existing empty row, use it
+            if (firstEmptyIndex !== -1 && i === 0) {
+              id = rows[firstEmptyIndex].id;
+              firstEmptyIndex = -1; // Mark as used
+            } 
+            // Otherwise create a new row
+            else {
               id = cuid();
-              const newRow: AnswerTableRow = {
-                id,
-                sourceData: { 
-                  type: "loading", 
-                  name: file.name 
-                } as any,
-                hidden: false,
-                cells: {}
+              const newRow = {
+                ...getBlankRow(),
+                id
               };
               placeholderRows.push(newRow);
             }
@@ -493,6 +488,14 @@ export const useStore = create<Store>()(
               // Upload the file
               const document = await uploadFile(file);
               
+              // Add document to tracked documents
+              get().addDocument(document);
+              
+              // Start polling for status updates if document is processing
+              if (document.status === 'processing') {
+                get().pollDocumentStatus(document.id);
+              }
+              
               // Update the row with actual document data
               const sourceData: SourceData = {
                 type: "document",
@@ -500,71 +503,49 @@ export const useStore = create<Store>()(
               };
               
               editTable(activeTableId, {
-                rows: where(getTable(activeTableId).rows, r => r.id === rowId, {
-                  sourceData,
-                  cells: {}
-                })
+                rows: where(get().getTable(activeTableId).rows, r => r.id === rowId, row => ({
+                  ...row, // Keep existing properties
+                  sourceData, // Update the sourceData
+                  cells: {} // Reset cells
+                }))
               });
               
               // Run queries for this row
               get().rerunRows([rowId]);
               
               successCount++;
-              return { success: true, file };
+              return { success: true, file, document };
             } catch (error) {
               console.error(`Error uploading file ${file.name}:`, error);
-              
-              // Update the row to show error state
-              editTable(activeTableId, {
-                rows: where(getTable(activeTableId).rows, r => r.id === rowId, {
-                  sourceData: { 
-                    type: "error", 
-                    name: file.name,
-                    error: error instanceof Error ? error.message : 'Unknown error'
-                  } as any,
-                  cells: {}
-                })
-              });
-              
               errorCount++;
-              
-              if (error instanceof ApiError) {
-                notifications.show({
-                  title: 'Upload failed',
-                  message: `Failed to upload ${file.name}: ${error.message}`,
-                  color: 'red'
-                });
-              } else {
-                notifications.show({
-                  title: 'Upload failed',
-                  message: `Failed to upload ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                  color: 'red'
-                });
-              }
-              
               return { success: false, file, error };
             }
           });
           
-          // Wait for all uploads to complete
           await Promise.all(uploadPromises);
           
-          if (successCount > 0) {
-            notifications.show({
-              title: 'Upload complete',
-              message: `Successfully uploaded ${successCount} document${successCount !== 1 ? 's' : ''}${errorCount > 0 ? `, ${errorCount} failed` : ''}`,
-              color: 'green'
-            });
-          }
-        } finally {
-          editTable(activeTableId, { uploadingFiles: false });
+          // Show notification about batch result
+          const s = successCount > 1 ? 's' : '';
+          notifications.show({
+            title: 'Upload complete',
+            message: `Successfully uploaded ${successCount} document${s}${errorCount > 0 ? `, ${errorCount} failed` : ''}`,
+            color: 'green'
+          });
+          
+        } catch (error) {
+          console.error('Error in batch upload:', error);
+          notifications.show({
+            title: 'Batch upload error',
+            message: error instanceof Error ? error.message : 'Unknown error',
+            color: 'red'
+          });
         }
       },
 
       // --- NEW ACTION: Ingest a single document by ID ---
       // Add types to parameters
       ingestSingleDocumentById: async (documentId: string, rowId: string, originalColumnId: string) => {
-        const { auth, getTable, editTable, fillRow, editCells } = get();
+        const { auth, editTable, fillRow, editCells } = get();
         
         if (!auth.token) {
           console.error('Authentication token not found.');
@@ -630,13 +611,13 @@ export const useStore = create<Store>()(
           const file = new File([textBlob], uploadFileName, { type: 'text/plain' });
 
           // Save the original cell value before it gets cleared by fillRow (if applicable)
-          const originalCellValue = getTable().rows.find(r => r.id === rowId)?.cells[originalColumnId];
+          const originalCellValue = get().getTable().rows.find(r => r.id === rowId)?.cells[originalColumnId];
 
           // 4. Upload the text file using fillRow, suppressing the individual notification
           await fillRow(rowId, file, { showNotification: false });
 
           // 5. Update the display name in the store AFTER successful upload
-          const currentTable = getTable();
+          const currentTable = get().getTable();
           editTable(currentTable.id, {
             rows: currentTable.rows.map(row => {
               if (row.id === rowId && row.sourceData?.type === 'document') {
@@ -1638,6 +1619,95 @@ export const useStore = create<Store>()(
             globalRules: table.globalRules.map(rule => ({ ...rule, resolvedEntities: [] }))
           });
         }
+      },
+
+      // Documents methods
+      addDocument: (document) => {
+        set({
+          documents: {
+            ...get().documents,
+            [document.id]: document
+          }
+        });
+      },
+
+      updateDocumentStatus: (documentId, status) => {
+        const { documents } = get();
+        
+        if (documents[documentId]) {
+          // Make sure status is one of the valid enum values
+          const validStatus = status === 'processing' || status === 'completed' || status === 'failed' 
+            ? status 
+            : 'completed'; // Default to completed for unknown status values
+            
+          set({
+            documents: {
+              ...documents,
+              [documentId]: {
+                ...documents[documentId],
+                status: validStatus
+              }
+            }
+          });
+        }
+      },
+
+      checkDocumentStatus: async (documentId) => {
+        try {
+          const { documents } = get();
+          
+          // Only check status for processing documents
+          if (!documents[documentId] || documents[documentId].status !== 'processing') {
+            return;
+          }
+          
+          const result = await checkDocumentStatus(documentId);
+          
+          if (result.status !== documents[documentId].status) {
+            // Update document status if changed
+            get().updateDocumentStatus(documentId, result.status);
+            
+            // Show notification on completion or failure
+            if (result.status === 'completed') {
+              notifications.show({
+                title: 'Document processed',
+                message: `Document ${documents[documentId].name} has been processed successfully`,
+                color: 'green'
+              });
+            } else if (result.status === 'failed') {
+              notifications.show({
+                title: 'Document processing failed',
+                message: `Processing of document ${documents[documentId].name} has failed`,
+                color: 'red'
+              });
+            }
+          }
+        } catch (error) {
+          console.error(`Error checking status for document ${documentId}:`, error);
+        }
+      },
+
+      pollDocumentStatus: async (documentId, interval = 3000, maxAttempts = 20) => {
+        let attempts = 0;
+        
+        const poll = async () => {
+          await get().checkDocumentStatus(documentId);
+          
+          const { documents } = get();
+          const document = documents[documentId];
+          
+          // Stop polling if document is complete, failed, or we've reached max attempts
+          if (!document || document.status !== 'processing' || attempts >= maxAttempts) {
+            return;
+          }
+          
+          // Continue polling
+          attempts++;
+          setTimeout(poll, interval);
+        };
+        
+        // Start polling
+        poll();
       }
     }),
     {

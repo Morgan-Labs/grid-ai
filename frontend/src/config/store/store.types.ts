@@ -13,11 +13,18 @@ export interface Store {
   activeTableId: string;
   activePopoverId: string | null;
   documentPreviews: Record<string, string[]>; // Store document preview content by document ID
+  documents: Record<string, Document>; // Store documents and their statuses
   auth: AuthState;
   _saveTableStateTimer: ReturnType<typeof setTimeout> | null; // Timer for debouncing table state saves
 
   toggleColorScheme: () => void;
   setActivePopover: (id: string | null) => void;
+  
+  // Document methods
+  addDocument: (document: Document) => void;
+  updateDocumentStatus: (documentId: string, status: string) => void;
+  checkDocumentStatus: (documentId: string) => Promise<void>;
+  pollDocumentStatus: (documentId: string, interval?: number, maxAttempts?: number) => void;
   
   // CSV/Excel import
   importCsvData: (data: string[][], preserveExistingColumns?: boolean) => Promise<void>;

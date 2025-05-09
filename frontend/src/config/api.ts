@@ -30,6 +30,7 @@ export const documentSchema = z.object({
   page_count: z.number().optional(),
   author: z.string().optional(),
   tag: z.string().optional(),
+  status: z.enum(["processing", "completed", "failed"]).default("completed"),
   chunks: z.array(chunkSchema).optional(),
 });
 export const answerSchema = z.union([
@@ -63,6 +64,7 @@ export const API_ENDPOINTS = {
   DOCUMENT_GET_TEXT: (id: string) => `${API_URL}/api/v1/document/get-text/${id}`,
   DOCUMENT_GET_METADATA: (id: string) => `${API_URL}/api/v1/document/get-metadata/${id}`,
   DOCUMENT_PREVIEW: (id: string) => `${API_URL}/api/v1/document/${id}/preview`,
+  DOCUMENT_STATUS: (id: string) => `${API_URL}/api/v1/document/${id}/status`,
   
   // Graph endpoints
   GRAPHS: `${API_URL}/api/v1/graphs`,
@@ -1018,3 +1020,32 @@ function fillMissingResults(
     console.log(`[${runId}] All ${results.length} queries have results (including fallbacks)`);
   }
 }
+
+// Check document status
+export const checkDocumentStatus = async (documentId: string): Promise<{ status: string }> => {
+  console.log(`Checking status for document: ${documentId}`);
+  
+  try {
+    const response = await fetch(API_ENDPOINTS.DOCUMENT_STATUS(documentId), {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+      mode: 'cors'
+    });
+    
+    if (!response.ok) {
+      console.error(`Failed to check document status: ${response.statusText}`);
+      // If the endpoint doesn't exist yet, default to completed status
+      if (response.status === 404) {
+        return { status: 'completed' };
+      }
+      throw new ApiError(`Failed to check document status: ${response.statusText}`, response.status);
+    }
+    
+    return response.json();
+  } catch (error) {
+    console.error('Error checking document status:', error);
+    // Return a default status if we can't reach the endpoint
+    return { status: 'completed' };
+  }
+};

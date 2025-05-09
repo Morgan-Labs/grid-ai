@@ -9,7 +9,8 @@ import {
   List,
   Button,
   FileButton,
-  Loader
+  Loader,
+  Badge
 } from "@mantine/core";
 import {
   IconFileText,
@@ -17,7 +18,8 @@ import {
   IconRefresh,
   IconTrash,
   IconUpload,
-  IconEye
+  IconEye,
+  IconAlertCircle
 } from "@tabler/icons-react";
 import { CellPopover } from "./index.utils";
 import { AnswerTableRow, useStore } from "@config/store";
@@ -58,8 +60,51 @@ export class KtRowCellTemplate implements CellTemplate<KtRowCell> {
   }
 }
 
+// Component to display a small status badge for the document row
+function DocumentStatusBadge({ status }: { status?: string }) {
+  if (!status || status === 'completed') {
+    return null; // Don't show badge for completed documents (default state)
+  }
+
+  switch (status) {
+    case 'processing':
+      return (
+        <Badge 
+          size="xs" 
+          color="yellow" 
+          variant="filled" 
+          leftSection={<Loader size="xs" color="yellow.9" />}
+        >
+          Processing
+        </Badge>
+      );
+    case 'failed':
+      return (
+        <Badge 
+          size="xs" 
+          color="red" 
+          variant="filled" 
+          leftSection={<IconAlertCircle size={12} />}
+        >
+          Failed
+        </Badge>
+      );
+    default:
+      return null;
+  }
+}
+
 function Content({ row }: { row: AnswerTableRow }) {
   const [previewOpen, setPreviewOpen] = useState(false);
+  
+  // Get document status from store if available
+  const documentStatus = useStore(state => {
+    if (row.sourceData?.type === 'document') {
+      const docId = row.sourceData.document.id;
+      return state.documents[docId]?.status || row.sourceData.document.status;
+    }
+    return undefined;
+  });
   
   const { mutateAsync: handleFillRow, isPending: isFillingRow } = useMutation({
     mutationFn: ({ id, file }: { id: string; file: File }) =>
@@ -186,7 +231,12 @@ function Content({ row }: { row: AnswerTableRow }) {
           target={
             <Group h="100%" pl="xs" gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
               <IconFileText size={18} opacity={0.7} style={{ flexShrink: 0 }} />
-              <Text fw={500} truncate>{row.sourceData.document.name}</Text>
+              <Group gap="xs" style={{ flex: 1, minWidth: 0 }}>
+                <Text fw={500} truncate style={{ flex: 1, minWidth: 0 }}>
+                  {row.sourceData.document.name}
+                </Text>
+                <DocumentStatusBadge status={documentStatus} />
+              </Group>
             </Group>
           }
           dropdown={
@@ -226,6 +276,10 @@ function Content({ row }: { row: AnswerTableRow }) {
                 </List.Item>
                 <List.Item>
                   <b>Page count</b>: {row.sourceData.document.page_count || 'Unknown'}
+                </List.Item>
+                <List.Item>
+                  <b>Status</b>: {documentStatus || 'completed'}
+                  {documentStatus === 'processing' && <Text component="span" ml={5} size="xs" fs="italic" c="dimmed">(processing in background)</Text>}
                 </List.Item>
               </List>
               <Button 

@@ -9,9 +9,11 @@ import {
   ScrollArea, 
   Stack, 
   Text, 
-  Title 
+  Title,
+  Badge,
+  Tooltip
 } from "@mantine/core";
-import { IconFileText, IconX } from "@tabler/icons-react";
+import { IconFileText, IconX, IconRefresh, IconCheck, IconAlertTriangle } from "@tabler/icons-react";
 import { useStore } from "@config/store";
 import { AnswerTableRow } from "@config/store/store.types";
 import { fetchDocumentPreview } from "@config/api";
@@ -21,10 +23,58 @@ interface DocumentPreviewProps {
   onClose: () => void;
 }
 
+// Component to display document status
+const DocumentStatus = ({ status, onRefresh }: { status?: string | null, onRefresh?: () => void }) => {
+  if (!status) return null;
+
+  // Status indicator based on document processing status
+  switch (status) {
+    case 'processing':
+      return (
+        <Tooltip label="Document is still being processed. Preview may be incomplete.">
+          <Badge color="yellow" size="lg" leftSection={<Loader size="xs" color="yellow" />}>
+            Processing
+          </Badge>
+        </Tooltip>
+      );
+    case 'completed':
+      return (
+        <Tooltip label="Document processing complete">
+          <Badge color="green" size="lg" leftSection={<IconCheck size={14} />}>
+            Complete
+          </Badge>
+        </Tooltip>
+      );
+    case 'failed':
+      return (
+        <Tooltip label="Document processing failed. Some content may be missing.">
+          <Group gap="xs">
+            <Badge color="red" size="lg" leftSection={<IconAlertTriangle size={14} />}>
+              Failed
+            </Badge>
+            {onRefresh && (
+              <Button 
+                variant="light" 
+                size="xs" 
+                rightSection={<IconRefresh size={14} />}
+                onClick={onRefresh}
+              >
+                Retry
+              </Button>
+            )}
+          </Group>
+        </Tooltip>
+      );
+    default:
+      return null;
+  }
+};
+
 export function KtDocumentPreview({ row, onClose }: DocumentPreviewProps) {
   const [loading, setLoading] = useState(false);
   const [content, setContent] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [refreshCount, setRefreshCount] = useState(0);
   
   // Use refs to track state between renders
   const contentFetchedRef = useRef(false);
@@ -34,10 +84,33 @@ export function KtDocumentPreview({ row, onClose }: DocumentPreviewProps) {
   const document = row?.sourceData?.type === 'document' ? row.sourceData.document : null;
   
   // Get store data
-  const { documentPreviews, addDocumentPreview } = useStore(state => ({
+  const { documentPreviews, addDocumentPreview, documents, checkDocumentStatus: checkStatus } = useStore(state => ({
     documentPreviews: state.documentPreviews,
-    addDocumentPreview: state.addDocumentPreview
+    addDocumentPreview: state.addDocumentPreview,
+    documents: state.documents,
+    checkDocumentStatus: state.checkDocumentStatus
   }));
+  
+  // Get document status from store
+  const documentStatus = document ? documents[document.id]?.status || document.status : null;
+  
+  // Force refresh content when document status changes to completed
+  useEffect(() => {
+    if (documentStatus === 'completed' && document && contentFetchedRef.current) {
+      setRefreshCount(prev => prev + 1);
+      contentFetchedRef.current = false;
+    }
+  }, [documentStatus, document?.id]);
+  
+  // Handle manual refresh
+  const handleRefresh = () => {
+    if (document) {
+      contentFetchedRef.current = false;
+      setRefreshCount(prev => prev + 1);
+      // Also trigger a status check
+      checkStatus(document.id);
+    }
+  };
   
   // Get chunks from the store for this row
   const chunks = useStore(state => {
@@ -63,7 +136,7 @@ export function KtDocumentPreview({ row, onClose }: DocumentPreviewProps) {
       return;
     }
     
-    // Skip if document hasn't changed
+    // Skip if document hasn't changed and no refresh was requested
     if (document.id === documentIdRef.current && contentFetchedRef.current) {
       return;
     }
@@ -74,6 +147,14 @@ export function KtDocumentPreview({ row, onClose }: DocumentPreviewProps) {
     // If we have chunks, use them as the document content
     if (chunks.length > 0) {
       setContent(chunks.map(chunk => chunk.text || chunk.content));
+      setError(null);
+      contentFetchedRef.current = true;
+      return;
+    }
+    
+    // Check if the document is still processing
+    if (documentStatus === 'processing' && !refreshCount) {
+      setContent(['Document is still being processed. Content may be incomplete.']);
       setError(null);
       contentFetchedRef.current = true;
       return;
@@ -142,7 +223,7 @@ export function KtDocumentPreview({ row, onClose }: DocumentPreviewProps) {
     
     fetchContent();
     
-  }, [document?.id]); // Only depend on document ID
+  }, [document?.id, documentStatus, refreshCount]); // Depend on document ID and status
   
   if (!row || !document) {
     return null;
@@ -167,7 +248,10 @@ export function KtDocumentPreview({ row, onClose }: DocumentPreviewProps) {
     >
       <Stack>
         <Card withBorder>
-          <Title order={4}>{document.name}</Title>
+          <Group justify="space-between" mb="xs">
+            <Title order={4}>{document.name}</Title>
+            <DocumentStatus status={documentStatus} onRefresh={handleRefresh} />
+          </Group>
           <Text size="sm" c="dimmed">Pages: {pageCount}</Text>
           <Text size="sm" c="dimmed">Author: {author}</Text>
           {tag && (
@@ -188,6 +272,22 @@ export function KtDocumentPreview({ row, onClose }: DocumentPreviewProps) {
                 <IconX size={40} color="red" />
                 <Text mt="md" c="red">{error}</Text>
               </Box>
+            ) : documentStatus === 'processing' ? (
+              <Stack>
+                <Box ta="center" py="md">
+                  <Loader />
+                  <Text mt="md">Document is still being processed. Preview may be incomplete.</Text>
+                </Box>
+                {content.length > 0 && (
+                  <Stack>
+                    {content.map((text, index) => (
+                      <Card key={index} withBorder p="md">
+                        <Text>{text}</Text>
+                      </Card>
+                    ))}
+                  </Stack>
+                )}
+              </Stack>
             ) : content.length > 0 ? (
               <Stack>
                 {content.map((text, index) => (
@@ -204,7 +304,18 @@ export function KtDocumentPreview({ row, onClose }: DocumentPreviewProps) {
           </ScrollArea>
         </Box>
         
-        <Button fullWidth onClick={onClose}>Close Preview</Button>
+        <Group>
+          <Button flex={1} onClick={onClose}>Close Preview</Button>
+          <Button 
+            flex={1} 
+            variant="light" 
+            leftSection={<IconRefresh size={16} />}
+            onClick={handleRefresh}
+            disabled={loading}
+          >
+            Refresh Preview
+          </Button>
+        </Group>
       </Stack>
     </Drawer>
   );
