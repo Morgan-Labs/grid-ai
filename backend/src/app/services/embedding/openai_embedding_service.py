@@ -36,12 +36,27 @@ class OpenAIEmbeddingService(EmbeddingService):
 
         if not texts:
             return []
+        
+        # Filter out empty or whitespace-only texts to prevent API errors
+        valid_texts = []
+        empty_indices = []
+        
+        for i, text in enumerate(texts):
+            if text and text.strip():  # Check if text is not empty or just whitespace
+                valid_texts.append(text)
+            else:
+                empty_indices.append(i)
+                
+        if not valid_texts:
+            logger.warning("All provided texts were empty or whitespace-only")
+            # Return empty embeddings of appropriate dimension if all texts are invalid
+            return [[0.0] * 1536] * len(texts)
 
         # Optimize batch size based on number of chunks
-        if len(texts) > 5000:
+        if len(valid_texts) > 5000:
             # For very large documents, use a larger batch size to reduce API calls
             batch_size = 250
-        elif len(texts) > 1000:
+        elif len(valid_texts) > 1000:
             # For large documents, use a moderate batch size
             batch_size = 150
         else:
@@ -49,13 +64,13 @@ class OpenAIEmbeddingService(EmbeddingService):
             batch_size = 100
 
         # Log summary info only
-        logger.info(f"Processing {len(texts)} text chunks in batches of {batch_size}")
+        logger.info(f"Processing {len(valid_texts)} text chunks in batches of {batch_size}")
 
         all_embeddings = []
-        total_batches = (len(texts) + batch_size - 1) // batch_size
+        total_batches = (len(valid_texts) + batch_size - 1) // batch_size
 
-        for i in range(0, len(texts), batch_size):
-            batch_texts = texts[i:i + batch_size]
+        for i in range(0, len(valid_texts), batch_size):
+            batch_texts = valid_texts[i:i + batch_size]
             batch_num = (i // batch_size) + 1
             
             try:
@@ -86,6 +101,26 @@ class OpenAIEmbeddingService(EmbeddingService):
                 
                 logger.warning(f"Added placeholder embeddings for batch {batch_num} due to error")
 
-        logger.info(f"Completed processing {len(all_embeddings)} embeddings in {total_batches} batches")
+        # Now reinsert placeholder embeddings for any empty texts
+        if empty_indices:
+            logger.warning(f"Adding placeholder embeddings for {len(empty_indices)} empty texts")
+            
+            # Use the dimension from successful embeddings or default
+            dim = len(all_embeddings[0]) if all_embeddings else 1536
+            
+            # Create a new list with placeholders inserted at the right positions
+            final_embeddings = []
+            valid_idx = 0
+            
+            for i in range(len(texts)):
+                if i in empty_indices:
+                    final_embeddings.append([0.0] * dim)
+                else:
+                    final_embeddings.append(all_embeddings[valid_idx])
+                    valid_idx += 1
+                    
+            logger.info(f"Completed processing {len(final_embeddings)} embeddings in {total_batches} batches")
+            return final_embeddings
         
+        logger.info(f"Completed processing {len(all_embeddings)} embeddings in {total_batches} batches")
         return all_embeddings

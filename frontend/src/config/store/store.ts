@@ -384,16 +384,19 @@ export const useStore = create<Store>()(
       // Updated fillRow to accept an options object
       fillRow: async (id: string, file: File, options = { showNotification: true }) => {
         const { activeTableId, editTable } = get();
+        
+        if (!file) return null;
+        
         try {
           const document = await uploadFile(file);
           
           // Add document to tracked documents
           get().addDocument(document);
           
-          // Start polling for status updates if document is processing
-          if (document.status === 'processing') {
-            get().pollDocumentStatus(document.id);
-          }
+          // Start polling for status updates - ALWAYS poll regardless of status
+          // This ensures we get an updated status even if initially reported as "completed"
+          console.log(`Starting status polling for document ${document.id} (${document.name}), status: ${document.status}`);
+          get().pollDocumentStatus(document.id);
           
           const sourceData: SourceData = {
             type: "document",
@@ -1684,26 +1687,46 @@ export const useStore = create<Store>()(
         }
       },
 
-      pollDocumentStatus: async (documentId, interval = 3000, maxAttempts = 20) => {
+      pollDocumentStatus: async (documentId, interval = 2000, maxAttempts = 30) => {
         let attempts = 0;
         
         const poll = async () => {
-          await get().checkDocumentStatus(documentId);
-          
-          const { documents } = get();
-          const document = documents[documentId];
-          
-          // Stop polling if document is complete, failed, or we've reached max attempts
-          if (!document || document.status !== 'processing' || attempts >= maxAttempts) {
-            return;
+          try {
+            // Force a fresh check of document status from the server
+            const result = await checkDocumentStatus(documentId);
+            
+            // Always update document status from API result
+            get().updateDocumentStatus(documentId, result.status);
+            
+            const { documents } = get();
+            const document = documents[documentId];
+            
+            console.log(`Polling document ${documentId} (${document?.name}): Status=${result.status}, Attempt=${attempts+1}/${maxAttempts}`);
+            
+            // Stop polling if document is complete, failed, or we've reached max attempts
+            if (result.status === 'completed' || result.status === 'failed' || attempts >= maxAttempts) {
+              console.log(`Stopping poll for document ${documentId}: Final status=${result.status}`);
+              
+              // Force a UI refresh
+              set(state => ({ ...state }));
+              return;
+            }
+            
+            // Continue polling with backoff
+            attempts++;
+            setTimeout(poll, interval);
+          } catch (error) {
+            console.error(`Error polling status for document ${documentId}:`, error);
+            
+            // Continue polling even after error, unless max attempts reached
+            if (attempts < maxAttempts) {
+              attempts++;
+              setTimeout(poll, interval);
+            }
           }
-          
-          // Continue polling
-          attempts++;
-          setTimeout(poll, interval);
         };
         
-        // Start polling
+        // Start polling immediately
         poll();
       }
     }),

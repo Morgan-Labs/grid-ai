@@ -196,6 +196,27 @@ async def process_query(
     # Step 1: Get search response
     search_response = await search_method(query, document_id, rules)
     chunks = extract_chunks(search_response)
+    
+    # Check if we got chunks back
+    if not chunks:
+        logger.warning(f"No chunks found for query: {query[:50]}... in document_id: {document_id}")
+        
+        # Return appropriate message based on format
+        if format == "bool":
+            answer_value = False
+        elif format == "int":
+            answer_value = 0
+        elif format in ["int_array", "str_array"]:
+            answer_value = []
+        else:  # str format
+            answer_value = "No relevant information found in the document. The document may still be processing or doesn't contain the information you're looking for."
+            
+        return QueryResult(
+            answer=answer_value,
+            chunks=[],
+            resolved_entities=[]
+        )
+        
     concatenated_chunks = " ".join(chunk.content for chunk in chunks)
 
     # Step 2: Generate response from LLM
@@ -273,159 +294,102 @@ async def process_queries_in_parallel(
     llm_service: CompletionService,
     vector_db_service: Any,
 ) -> List[QueryResult]:
-    """
-    Process multiple queries in parallel with optimized concurrency control.
-    
-    Parameters
-    ----------
-    queries : List[Dict[str, Any]]
-        List of query parameters, each containing:
-        - query_type: QueryType
-        - query: str
-        - document_id: str
-        - rules: List[Rule]
-        - format: FormatType
-        - _original_req: Optional[QueryRequestSchema] - Original request with model info
-    llm_service : CompletionService
-        The language model service.
-    vector_db_service : Any
-        The vector database service.
-        
-    Returns
-    -------
-    List[QueryResult]
-        List of query results in the same order as the input queries.
-    """
+    """Process multiple queries in parallel with optimized concurrency control and error handling."""
     logger.info(f"Processing {len(queries)} queries in parallel")
     
-    # Prioritize queries - put simpler queries first for faster initial results
-    prioritized_queries = sorted(
-        enumerate(queries), 
-        key=lambda x: 0 if x[1]["query_type"] == "simple_vector" else 1
-    )
-    original_indices = [idx for idx, _ in prioritized_queries]
-    sorted_queries = [q for _, q in prioritized_queries]
+    # Create function mapping for query types
+    query_functions = {
+        "decomposition": decomposition_query,
+        "hybrid": hybrid_query,
+        "simple_vector": simple_vector_query,
+        "inference": inference_query,
+    }
     
-    # Create tasks with retry logic and custom LLM services if needed
-    tasks = []
-    for q in sorted_queries:
-        # Check if this query has a custom model specified
-        custom_llm = llm_service
-        if "_original_req" in q and hasattr(q["_original_req"], "prompt") and hasattr(q["_original_req"].prompt, "llm_model") and q["_original_req"].prompt.llm_model:
-            # Create a copy of the settings to avoid modifying the global settings
-            from app.core.config import Settings
-            from app.core.dependencies import get_settings
-            from app.services.llm.factory import CompletionServiceFactory
-            
-            # Get current settings
-            settings = get_settings()
-            
-            # Create a new settings object for this query
-            req_settings = Settings()
-            req_settings.llm_model = q["_original_req"].prompt.llm_model
-            req_settings.llm_provider = settings.llm_provider
-            req_settings.portkey_api_key = settings.portkey_api_key
-            req_settings.portkey_enabled = settings.portkey_enabled
-            req_settings.openai_api_key = settings.openai_api_key
-            
-            # Auto-detect provider from model name
-            provider = None
-            model = q["_original_req"].prompt.llm_model.lower()
-            if "claude" in model:
-                provider = "anthropic"
-            elif "gemini" in model:
-                provider = "gemini"
-            elif "gpt" in model:
-                provider = "openai"
-            
-            # Configure LLM service
-            # Provider keys for all providers
-            provider_keys = {
-                "anthropic": "anthropic-a27fda",
-                "gemini": "gemini-3161fc", 
-                "openai": "openai-6a3e17"
-            }
-            
-            # Get virtual key for the provider
-            virtual_key = provider_keys.get(provider)
-            
-            if provider != "openai":
-                # For non-OpenAI providers, always use Portkey
-                req_settings.llm_provider = "portkey"
-                custom_llm = CompletionServiceFactory.create_service(req_settings)
-            else:
-                # For OpenAI, we can use Portkey too
-                req_settings.llm_provider = "portkey"
-                custom_llm = CompletionServiceFactory.create_service(req_settings)
-            
-            # Configure virtual key and model for all providers
-            if hasattr(custom_llm, 'update_virtual_key') and virtual_key:
-                try:
-                    logger.info(f"Setting virtual key for {provider}: {virtual_key} with model: {model}")
-                    custom_llm.update_virtual_key(virtual_key, provider, model)
-                except Exception as e:
-                    logger.error(f"Error setting virtual key: {str(e)}")
-            
-            logger.info(f"Using custom LLM model for query: {req_settings.llm_model}")
+    # Filter out invalid queries
+    valid_queries = []
+    invalid_indices = []
+    
+    for i, query_params in enumerate(queries):
+        query_text = query_params.get("query", "")
         
-        # Create task with the appropriate LLM service
-        task = process_query_with_retry(
-            q["query_type"],
-            q["query"],
-            q["document_id"],
-            q["rules"],
-            q["format"],
-            custom_llm,
-            vector_db_service,
+        # Skip empty queries or whitespace-only queries
+        if not query_text or not query_text.strip():
+            logger.warning(f"Skipping empty query at index {i}")
+            invalid_indices.append(i)
+            continue
+            
+        valid_queries.append((i, query_params))
+    
+    # Create a list to store results, initialized with None
+    all_results = [None] * len(queries)
+    
+    # Fill invalid queries with empty results
+    for idx in invalid_indices:
+        query_params = queries[idx]
+        format_type = query_params.get("format", "str")
+        
+        # Create appropriate empty result based on format
+        if format_type == "bool":
+            answer = False
+        elif format_type == "int":
+            answer = 0
+        elif format_type in ["int_array", "str_array"]:
+            answer = []
+        else:
+            answer = "Empty query received. Please provide a valid question."
+            
+        all_results[idx] = QueryResult(
+            answer=answer,
+            chunks=[],
+            resolved_entities=[]
         )
-        tasks.append(task)
     
-    # Use a larger batch size for the first batch to get initial results faster
-    first_batch_size = min(len(tasks), MAX_CONCURRENT_QUERIES * 2)
-    remaining_tasks = tasks[first_batch_size:]
+    # If no valid queries, return early
+    if not valid_queries:
+        logger.warning("No valid queries to process")
+        return all_results
     
-    # Process first batch with higher priority
-    logger.info(f"Processing first batch with {first_batch_size} queries")
-    first_batch_results = await asyncio.gather(*tasks[:first_batch_size], return_exceptions=True)
+    # Process the first batch (all queries)
+    logger.info(f"Processing first batch with {len(valid_queries)} queries")
     
-    # Process remaining batches
-    remaining_results = []
-    if remaining_tasks:
-        # Process remaining tasks with standard concurrency
-        logger.info(f"Processing remaining {len(remaining_tasks)} queries")
-        remaining_results = await asyncio.gather(*remaining_tasks, return_exceptions=True)
-    
-    # Combine results
-    batch_results = first_batch_results + remaining_results
-    
-    # Process results, converting exceptions to fallback values
-    results = [None] * len(queries)  # Pre-allocate result list
-    
-    for i, result in enumerate(batch_results):
-        original_idx = original_indices[i]
-        q = queries[original_idx]
+    batch_tasks = []
+    for idx, query_params in valid_queries:
+        query_type = query_params.get("query_type", "hybrid")
+        query_func = query_functions.get(query_type, hybrid_query)
         
-        if isinstance(result, Exception):
-            logger.error(f"Query {original_idx} failed: {str(result)}")
-            # Create fallback result based on format
-            if q["format"] == "int":
-                fallback_answer = 0
-            elif q["format"] == "bool":
-                fallback_answer = False
-            elif q["format"].endswith("_array"):
-                fallback_answer = []
+        # Skip query_type from parameters for function call
+        params = {k: v for k, v in query_params.items() 
+                  if k not in ["query_type", "_original_req", "request"]}
+        
+        # Include query_type as the first positional argument
+        task = asyncio.create_task(process_query_with_retry(query_type, **params))
+        batch_tasks.append((idx, task))
+    
+    # Wait for all tasks to complete
+    for idx, task in batch_tasks:
+        try:
+            result = await task
+            all_results[idx] = result
+        except Exception as e:
+            logger.error(f"Error processing query {idx}: {str(e)}")
+            # Create fallback result
+            format_type = queries[idx].get("format", "str")
+            if format_type == "bool":
+                answer = False
+            elif format_type == "int":
+                answer = 0
+            elif format_type in ["int_array", "str_array"]:
+                answer = []
             else:
-                fallback_answer = ""
-            
-            results[original_idx] = QueryResult(
-                answer=fallback_answer,
+                answer = f"Error processing query: {str(e)}"
+                
+            all_results[idx] = QueryResult(
+                answer=answer,
                 chunks=[],
                 resolved_entities=[]
             )
-        else:
-            results[original_idx] = result
     
-    return results
+    return all_results
 
 
 # Convenience functions for specific query types

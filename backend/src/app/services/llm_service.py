@@ -129,6 +129,19 @@ async def generate_response(
     """
     logger.info(f"Generating response for query: {query} in format: {format}")
 
+    # Check if chunks are empty or only contain whitespace
+    if not chunks or not chunks.strip():
+        logger.warning("No relevant context found for the query")
+        
+        # Return appropriate message for the format type
+        if format == "bool":
+            return {"answer": False}
+        elif format in ["int", "int_array"]:
+            return {"answer": [] if format == "int_array" else 0}
+        else:  # str or str_array formats
+            message = "No relevant information found in the document to answer this query."
+            return {"answer": [message] if format == "str_array" else message}
+
     output_model, format_specific_instructions = _get_model_and_instructions(
         format, rules, query
     )
@@ -145,13 +158,29 @@ async def generate_response(
 
         if response is None or response.answer is None:
             logger.warning("LLM returned None response")
-            return {"answer": None}
+            
+            # Return appropriate message for the format type
+            if format == "bool":
+                return {"answer": False}
+            elif format in ["int", "int_array"]:
+                return {"answer": [] if format == "int_array" else 0}
+            else:  # str or str_array formats
+                message = "Unable to generate a response based on the available information."
+                return {"answer": [message] if format == "str_array" else message}
 
         logger.info(f"Processed response: {response.answer}")
         return {"answer": response.answer}
     except Exception as e:
         logger.error(f"Error generating response: {str(e)}", exc_info=True)
-        return {"answer": None}
+        
+        # Return appropriate message for the format type
+        if format == "bool":
+            return {"answer": False}
+        elif format in ["int", "int_array"]:
+            return {"answer": [] if format == "int_array" else 0}
+        else:  # str or str_array formats
+            message = f"Error generating response: {str(e)}"
+            return {"answer": [message] if format == "str_array" else message}
 
 
 async def generate_inferred_response(
