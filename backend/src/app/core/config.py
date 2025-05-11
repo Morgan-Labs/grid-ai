@@ -92,6 +92,7 @@ class Settings(BaseSettings):
     milvus_db_uri: str = "/data/milvus_db.db"
     milvus_db_token: str = "root:Milvus"
     table_states_db_uri: str = "/data/table_states.db"
+    documents_db_uri: str = "/data/documents.db"
 
     # QDRANT CONFIG
     qdrant: Qdrant = Field(default_factory=lambda: Qdrant())
@@ -136,18 +137,6 @@ def get_settings() -> Settings:
     """Get the settings for the application."""
     logger.info("Loading config settings from the environment...")
     
-    # # Debug: Check for .env files
-    # env_paths = ["../../../backend/.env", "../../.env", "../.env", ".env"]
-    # for env_path in env_paths:
-    #     path = Path(env_path)
-    #     if path.exists():
-    #         logger.info(f"Found .env file at: {path.absolute()}")
-    #     else:
-    #         logger.info(f".env file not found at: {path.absolute()}")
-    
-    # # Debug: Current working directory
-    # logger.info(f"Current working directory: {os.getcwd()}")
-    
     settings = Settings()
     
     # Debug log to check if the OpenAI API key is loaded
@@ -168,10 +157,5 @@ def get_settings() -> Settings:
         settings.portkey_enabled = True
     else:
         logger.info("Portkey API key is not set, Portkey integration is disabled")
-    
-    # # Debug log to check vector db provider and Qdrant configuration
-    # logger.info(f"Vector DB provider: {settings.vector_db_provider}")
-    # if settings.vector_db_provider == "qdrant":
-    #     logger.info(f"Qdrant configuration: {settings.qdrant.model_dump()}")
     
     return settings
