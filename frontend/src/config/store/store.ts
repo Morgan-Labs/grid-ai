@@ -1687,8 +1687,10 @@ export const useStore = create<Store>()(
         }
       },
 
-      pollDocumentStatus: async (documentId, interval = 2000, maxAttempts = 30) => {
+      pollDocumentStatus: async (documentId, interval = 2000, maxAttempts = 60) => {
         let attempts = 0;
+        let currentInterval = interval;
+        const maxInterval = 15000; // 15 seconds max interval
         
         const poll = async () => {
           try {
@@ -1712,17 +1714,24 @@ export const useStore = create<Store>()(
               return;
             }
             
-            // Continue polling with backoff
+            // Continue polling with exponential backoff
             attempts++;
-            setTimeout(poll, interval);
+            // Double the interval each time, up to maxInterval
+            currentInterval = Math.min(currentInterval * 1.5, maxInterval);
+            
+            // Continue polling even after maxAttempts, but at maximum interval
+            if (attempts >= maxAttempts) {
+              console.log(`Reached max attempts for ${documentId}, continuing with ${maxInterval}ms interval`);
+              setTimeout(poll, maxInterval);
+            } else {
+              setTimeout(poll, currentInterval);
+            }
           } catch (error) {
             console.error(`Error polling status for document ${documentId}:`, error);
             
-            // Continue polling even after error, unless max attempts reached
-            if (attempts < maxAttempts) {
-              attempts++;
-              setTimeout(poll, interval);
-            }
+            // Continue polling even after error
+            attempts++;
+            setTimeout(poll, currentInterval * 2); // Longer delay after error
           }
         };
         
