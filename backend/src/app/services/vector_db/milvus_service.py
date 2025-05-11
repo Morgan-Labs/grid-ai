@@ -161,19 +161,29 @@ class MilvusService(VectorDBService):
             logger.info("Searching...")
 
             # Search the collection
-            query_response = self.client.search(
-                collection_name=self.settings.index_name,
-                data=embedded_query,
-                filter=f"document_id == '{document_id}'",
-                limit=40,
-                output_fields=[
-                    "text",
-                    "page_number",
-                    "document_id",
-                    "chunk_number",
-                ],
-            )
-
+            milvus_filter = f"document_id == '{document_id}'"
+            logger.info(f"Milvus search filter: {milvus_filter}")
+            try:
+                query_response = self.client.search(
+                    collection_name=self.settings.index_name,
+                    data=embedded_query,
+                    filter=milvus_filter,
+                    limit=40, # Consider making this configurable
+                    output_fields=[
+                        "text",
+                        "page_number",
+                        "document_id",
+                        "chunk_number",
+                    ],
+                )
+            except Exception as e:
+                logger.error(f"Milvus vector_search failed for document_id '{document_id}' with filter '{milvus_filter}': {str(e)}", exc_info=True)
+                # Return an error response that QueryService can handle
+                return VectorResponseSchema(
+                    message=f"Error during vector search for document {document_id}: Milvus operation failed.",
+                    chunks=[]
+                )
+            
             # Add the chunks to the final chunks
             final_chunks.extend(
                 item["entity"] for result in query_response for item in result
@@ -212,21 +222,29 @@ class MilvusService(VectorDBService):
             for keyword in keywords:
                 logger.info(f"Running keyword search for: {keyword}")
 
-                clean_keyword = keyword.replace("%", "\\%").replace("_", "\\_")
-
+                clean_keyword = keyword.replace("%", "\\\\%").replace("_", "\\\\_")
                 filter_string = f'(text like "%{clean_keyword}%") && document_id == "{document_id}"'
-
-                # Query the collection
-                keyword_response = self.client.query(
-                    collection_name=self.settings.index_name,
-                    filter=filter_string,
-                    output_fields=[
-                        "text",
-                        "page_number",
-                        "document_id",
-                        "chunk_number",
-                    ],
-                )
+                logger.info(f"Milvus keyword_search filter: {filter_string}")
+                try:
+                    keyword_response = self.client.query(
+                        collection_name=self.settings.index_name,
+                        filter=filter_string,
+                        output_fields=[
+                            "text",
+                            "page_number",
+                            "document_id",
+                            "chunk_number",
+                        ],
+                    )
+                except Exception as e:
+                    logger.error(f"Milvus keyword_search failed for document_id '{document_id}' with keyword '{keyword}': {str(e)}", exc_info=True)
+                    # Continue to next keyword or return an error for the whole function?
+                    # For now, let's make the whole function return an error if any keyword query fails.
+                    return VectorResponseSchema(
+                        message=f"Error during keyword search for document {document_id}: Milvus operation failed for keyword '{keyword}'.",
+                        chunks=[],
+                        keywords=[] # Or maybe just the keywords processed so far
+                    )
 
                 chunks = json.dumps(keyword_response, indent=2)
                 deserialized_chunks = json.loads(chunks)
@@ -288,20 +306,24 @@ class MilvusService(VectorDBService):
             filter_string = (
                 f'({like_conditions}) && document_id == "{document_id}"'
             )
-
-            logger.info("Running query with keyword filters.")
-
-            # Query the collection
-            keyword_response = self.client.query(
-                collection_name=self.settings.index_name,
-                filter=filter_string,
-                output_fields=[
-                    "text",
-                    "page_number",
-                    "document_id",
-                    "chunk_number",
-                ],
-            )
+            logger.info(f"Milvus hybrid_search (keyword part) filter: {filter_string}")
+            try:
+                keyword_response = self.client.query(
+                    collection_name=self.settings.index_name,
+                    filter=filter_string,
+                    output_fields=[
+                        "text",
+                        "page_number",
+                        "document_id",
+                        "chunk_number",
+                    ],
+                )
+            except Exception as e:
+                logger.error(f"Milvus hybrid_search (keyword part) failed for document_id '{document_id}': {str(e)}", exc_info=True)
+                return VectorResponseSchema(
+                    message=f"Error during keyword part of hybrid search for document {document_id}: Milvus operation failed.",
+                    chunks=[]
+                )
 
             keyword_chunks = json.dumps(keyword_response, indent=2)
             deserialized_keyword_chunks = json.loads(keyword_chunks)
@@ -326,11 +348,21 @@ class MilvusService(VectorDBService):
 
         try:
             # First, let's check if there are any vectors for this document_id
-            count_response = self.client.query(
-                collection_name=self.settings.index_name,
-                filter=f'document_id == "{document_id}"',
-                output_fields=["count(*)"],
-            )
+            count_filter = f'document_id == "{document_id}"'
+            logger.info(f"Milvus hybrid_search (count check) filter: {count_filter}")
+            try:
+                count_response = self.client.query(
+                    collection_name=self.settings.index_name,
+                    filter=count_filter,
+                    output_fields=["count(*)"],
+                )
+            except Exception as e:
+                logger.error(f"Milvus hybrid_search (count check) failed for document_id '{document_id}': {str(e)}", exc_info=True)
+                return VectorResponseSchema(
+                    message=f"Error during count check in hybrid search for document {document_id}: Milvus operation failed.",
+                    chunks=[]
+                )
+            
             vector_count = count_response[0]["count(*)"]
             logger.info(
                 f"Number of vectors for document_id {document_id}: {vector_count}"
@@ -345,18 +377,28 @@ class MilvusService(VectorDBService):
                 )
 
             # Now let's perform the search
-            semantic_response = self.client.search(
-                collection_name=self.settings.index_name,
-                data=embedded_query,
-                filter=f'document_id == "{document_id}"',
-                limit=40,
-                output_fields=[
-                    "text",
-                    "page_number",
-                    "document_id",
-                    "chunk_number",
-                ],
-            )
+            semantic_filter = f'document_id == "{document_id}"'
+            logger.info(f"Milvus hybrid_search (semantic part) filter: {semantic_filter}")
+            try:
+                semantic_response = self.client.search(
+                    collection_name=self.settings.index_name,
+                    data=embedded_query,
+                    filter=semantic_filter,
+                    limit=40,
+                    output_fields=[
+                        "text",
+                        "page_number",
+                        "document_id",
+                        "chunk_number",
+                    ],
+                )
+            except Exception as e:
+                logger.error(f"Milvus hybrid_search (semantic part) failed for document_id '{document_id}': {str(e)}", exc_info=True)
+                return VectorResponseSchema(
+                    message=f"Error during semantic part of hybrid search for document {document_id}: Milvus operation failed.",
+                    chunks=[]
+                )
+
             logger.info(
                 f"Number of results from semantic search: {len(semantic_response)}"
             )
@@ -406,11 +448,13 @@ class MilvusService(VectorDBService):
             )
 
         except Exception as e:
-            logger.error(f"Error during Milvus search: {e}")
-            logger.error(
-                f"Milvus search parameters: collection_name={self.settings.index_name}, data shape=1x{len(embedded_query)}"
+            logger.error(f"Generic error during Milvus hybrid_search for document_id '{document_id}': {str(e)}", exc_info=True)
+            # This broad exception now also returns a VectorResponseSchema
+            return VectorResponseSchema(
+                message=f"An unexpected error occurred during hybrid search for document {document_id}.",
+                chunks=[]
             )
-            raise
+            # raise # Original code re-raised, which we want to avoid for the No response returned error
 
     async def decomposed_search(
         self, query: str, document_id: str, rules: List[Rule], parent_run_id: str = None
