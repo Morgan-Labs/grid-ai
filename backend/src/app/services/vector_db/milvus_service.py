@@ -39,13 +39,16 @@ class MilvusService(VectorDBService):
         settings: Settings,
     ):
         """Initialize the Milvus service."""
-        self.embedding_service = embedding_service
+        # Call parent class __init__ to initialize embedding cache
+        super().__init__(embedding_service, settings)
+        
         self.llm_service = llm_service
         self.settings = settings
         self.client = MilvusClient(
             uri=self.settings.milvus_db_uri,
             token=self.settings.milvus_db_token,
         )
+        logger.info(f"Initialized Milvus service with URI {self.settings.milvus_db_uri}")
 
     async def ensure_collection_exists(self) -> None:
         """Ensure the collection exists in the Milvus database."""

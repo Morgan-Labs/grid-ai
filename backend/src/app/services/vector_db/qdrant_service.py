@@ -43,11 +43,14 @@ class QdrantService(VectorDBService):
         llm_service: CompletionService,
         settings: Settings,
     ):
+        # Call parent class __init__ to initialize embedding cache
+        super().__init__(embedding_service, settings)
+        
         self.settings = settings
         self.llm_service = llm_service
-        self.embedding_service = embedding_service
         self.collection_name = settings.index_name
         self.dimensions = settings.dimensions
+        logger.info(f"Initialized Qdrant service with collection {self.collection_name}")
         qdrant_config = settings.qdrant.model_dump(exclude_none=True)
         self.client = QdrantClient(**qdrant_config)
 

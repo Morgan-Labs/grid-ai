@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     dimensions: int = 1536
     embedding_provider: str = "openai"
     embedding_model: str = "text-embedding-3-small"
+    use_optimized_embedding: bool = True  # Use optimized embedding service with parallel processing
+    embedding_cache_size: int = 50000  # Maximum number of embeddings to cache
+    embedding_max_parallel: int = 5  # Maximum number of parallel embedding requests
     llm_provider: str = "portkey"  # Options: openai, anthropic, gemini
     llm_model: str = "gpt-4.1"
     llm_virtual_key: Optional[str] = None  # Portkey virtual key for the selected provider/model

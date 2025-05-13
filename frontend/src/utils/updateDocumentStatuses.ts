@@ -1,5 +1,5 @@
 import { useStore } from "../config/store";
-import { checkDocumentStatus } from "../config/api";
+import { documentStatusCache } from "../services/document-status-cache";
 
 /**
  * Updates document statuses in the table state
@@ -38,12 +38,12 @@ export async function updateDocumentStatusesInTableState(retryCount = 0, maxRetr
     const docId = document.id;
     
     try {
-      // Check actual status from backend
-      const result = await checkDocumentStatus(docId);
+      // Check actual status from backend via cache
+      const status = await documentStatusCache.getStatus(docId);
       
       // Always update the status to match the backend, regardless of current status
-      if (result.status !== document.status) {
-        console.log(`Updating document ${docId} status from ${document.status} to ${result.status}`);
+      if (status !== document.status) {
+        console.log(`Updating document ${docId} status from ${document.status} to ${status}`);
         
         // Create updated rows with the new document status
         const updatedRows = table.rows.map(r => {
@@ -54,7 +54,7 @@ export async function updateDocumentStatusesInTableState(retryCount = 0, maxRetr
                 ...sourceData,
                 document: {
                   ...document,
-                  status: result.status
+                  status: status
                 }
               }
             };
@@ -69,7 +69,7 @@ export async function updateDocumentStatusesInTableState(retryCount = 0, maxRetr
         
         // Also update the status in the documents store
         if (store.documents[docId]) {
-          store.updateDocumentStatus(docId, result.status);
+          store.updateDocumentStatus(docId, status);
         }
         
         tableUpdated = true;

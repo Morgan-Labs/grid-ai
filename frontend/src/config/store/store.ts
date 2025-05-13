@@ -1737,7 +1737,7 @@ export const useStore = create<Store>()(
         }
       },
 
-      pollDocumentStatus: async (documentId, interval = 3000, maxAttempts = 80) => {
+      pollDocumentStatus: async (documentId, initialInterval = 3000, maxAttempts = 20) => {
         let attempts = 0;
         
         const poll = async () => {
@@ -1751,9 +1751,18 @@ export const useStore = create<Store>()(
             return;
           }
           
-          // Continue polling
+          // Continue polling with exponential backoff
           attempts++;
-          setTimeout(poll, interval);
+          
+          // Calculate next interval with exponential backoff
+          // Double the interval each time, capped at 3 minutes
+          const nextInterval = Math.min(
+            initialInterval * Math.pow(2, attempts - 1),
+            180000 // 3 minutes max
+          );
+          
+          console.log(`Scheduling next document status check in ${nextInterval/1000} seconds (attempt ${attempts}/${maxAttempts})`);
+          setTimeout(poll, nextInterval);
         };
         
         // Start polling

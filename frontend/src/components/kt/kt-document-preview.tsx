@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { documentStatusCache } from "../../services/document-status-cache";
 import { 
   Box, 
   Button, 
@@ -75,6 +76,7 @@ export function KtDocumentPreview({ row, onClose }: DocumentPreviewProps) {
   const [content, setContent] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshCount, setRefreshCount] = useState(0);
+  const [documentStatus, setDocumentStatus] = useState<string | null>(null);
   
   // Use refs to track state between renders
   const contentFetchedRef = useRef(false);
@@ -91,27 +93,6 @@ export function KtDocumentPreview({ row, onClose }: DocumentPreviewProps) {
     checkDocumentStatus: state.checkDocumentStatus
   }));
   
-  // Get document status from store
-  const documentStatus = document ? documents[document.id]?.status || document.status : null;
-  
-  // Force refresh content when document status changes to completed
-  useEffect(() => {
-    if (documentStatus === 'completed' && document && contentFetchedRef.current) {
-      setRefreshCount(prev => prev + 1);
-      contentFetchedRef.current = false;
-    }
-  }, [documentStatus, document?.id]);
-  
-  // Handle manual refresh
-  const handleRefresh = () => {
-    if (document) {
-      contentFetchedRef.current = false;
-      setRefreshCount(prev => prev + 1);
-      // Also trigger a status check
-      checkStatus(document.id);
-    }
-  };
-  
   // Get chunks from the store for this row
   const chunks = useStore(state => {
     if (!row) return [];
@@ -124,6 +105,74 @@ export function KtDocumentPreview({ row, onClose }: DocumentPreviewProps) {
       
     return rowChunks;
   });
+  
+  // Determine effective document status
+  useEffect(() => {
+    if (!document) {
+      setDocumentStatus(null);
+      return;
+    }
+    
+    // If document has content (chunks or preview), always treat as completed regardless of status
+    const hasContent = (chunks.length > 0) || (documentPreviews[document.id]?.length > 0);
+    if (hasContent) {
+      setDocumentStatus('completed');
+      return;
+    }
+    
+    // Get initial status from store
+    const initialStatus = documents[document.id]?.status || document.status;
+    setDocumentStatus(initialStatus);
+    
+    // Fetch latest status from API via cache
+    const fetchStatus = async () => {
+      try {
+        const status = await documentStatusCache.getStatus(document.id);
+        setDocumentStatus(status);
+        
+        // Update store status if different
+        if (status !== initialStatus) {
+          checkStatus(document.id);
+        }
+      } catch (error) {
+        console.error(`Error fetching document status for ${document.id}:`, error);
+      }
+    };
+    
+    fetchStatus();
+  }, [document?.id, chunks.length, refreshCount]);
+  
+  // Force refresh content when document status changes to completed
+  useEffect(() => {
+    if (documentStatus === 'completed' && document && contentFetchedRef.current) {
+      setRefreshCount(prev => prev + 1);
+      contentFetchedRef.current = false;
+    }
+  }, [documentStatus, document?.id]);
+  
+  // Handle manual refresh
+  const handleRefresh = async () => {
+    if (document) {
+      contentFetchedRef.current = false;
+      
+      // Clear cache and fetch fresh status
+      documentStatusCache.clearCache(document.id);
+      
+      try {
+        // Fetch latest status directly from API
+        const status = await documentStatusCache.getStatus(document.id);
+        setDocumentStatus(status);
+        
+        // Also update store status
+        checkStatus(document.id);
+      } catch (error) {
+        console.error(`Error refreshing document status for ${document.id}:`, error);
+      }
+      
+      // Trigger refresh of content
+      setRefreshCount(prev => prev + 1);
+    }
+  };
   
   // Load document content
   useEffect(() => {

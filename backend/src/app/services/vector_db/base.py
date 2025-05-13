@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from app.models.query_core import Rule
 from app.schemas.query_api import VectorResponseSchema
 from app.services.embedding.base import EmbeddingService
+from app.services.embedding.cache import EmbeddingCache
 from app.services.llm.base import CompletionService
 from app.services.llm_service import get_keywords
 
@@ -32,6 +33,19 @@ class VectorDBService(ABC):
     """The base class for the vector database services."""
 
     embedding_service: EmbeddingService
+    
+    # Shared embedding cache for all vector DB service instances
+    # Will be initialized in __init__ with settings
+    embedding_cache = None
+    
+    def __init__(self, embedding_service: EmbeddingService, settings):
+        """Initialize the vector DB service with embedding service and settings."""
+        self.embedding_service = embedding_service
+        
+        # Initialize the embedding cache if not already initialized
+        if VectorDBService.embedding_cache is None:
+            VectorDBService.embedding_cache = EmbeddingCache(max_size=settings.embedding_cache_size)
+            logger.info(f"Initialized embedding cache with max size {settings.embedding_cache_size}")
 
     @abstractmethod
     async def upsert_vectors(
@@ -82,10 +96,53 @@ class VectorDBService(ABC):
     async def get_embeddings(
         self, texts: Union[str, List[str]], parent_run_id: str = None
     ) -> List[List[float]]:
-        """Get embeddings for the given text(s) using the embedding service."""
+        """Get embeddings for the given text(s) using the embedding service with caching."""
         if isinstance(texts, str):
             texts = [texts]
-        return await self.embedding_service.get_embeddings(texts, parent_run_id)
+            
+        # Check cache first
+        result = []
+        texts_to_embed = []
+        cache_indices = []
+        
+        # Check cache for each text
+        for i, text in enumerate(texts):
+            cached_embedding = self.embedding_cache.get(text)
+            if cached_embedding:
+                result.append(cached_embedding)
+            else:
+                texts_to_embed.append(text)
+                cache_indices.append(i)
+        
+        # If all embeddings were cached, return immediately
+        if not texts_to_embed:
+            logger.info(f"All {len(texts)} embeddings found in cache")
+            return result
+        
+        # Get embeddings for texts not in cache
+        cache_hit_rate = (len(texts) - len(texts_to_embed)) / len(texts)
+        logger.info(f"Getting embeddings for {len(texts_to_embed)} texts (cache hit rate: {cache_hit_rate:.2%})")
+        new_embeddings = await self.embedding_service.get_embeddings(texts_to_embed, parent_run_id)
+        
+        # Update cache with new embeddings
+        for i, embedding in enumerate(new_embeddings):
+            self.embedding_cache.set(texts_to_embed[i], embedding)
+        
+        # Merge cached and new embeddings in the correct order
+        final_result = [None] * len(texts)
+        
+        # Place cached embeddings
+        cached_count = 0
+        for i in range(len(texts)):
+            if i not in cache_indices:
+                final_result[i] = result[cached_count]
+                cached_count += 1
+                
+        # Place new embeddings
+        for i, embedding in zip(cache_indices, new_embeddings):
+            final_result[i] = embedding
+            
+        return final_result
 
     async def get_single_embedding(self, text: str, parent_run_id: str = None) -> List[float]:
         """Get a single embedding for the given text."""

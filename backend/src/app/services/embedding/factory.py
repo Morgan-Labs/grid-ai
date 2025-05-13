@@ -8,6 +8,9 @@ from app.services.embedding.base import EmbeddingService
 from app.services.embedding.openai_embedding_service import (
     OpenAIEmbeddingService,
 )
+from app.services.embedding.optimized_openai_embedding_service import (
+    OptimizedOpenAIEmbeddingService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +24,16 @@ class EmbeddingServiceFactory:
         logger.info(
             f"Creating embedding service for provider: {settings.embedding_provider}"
         )
+        
+        # Check if optimized mode is enabled
+        use_optimized = getattr(settings, "use_optimized_embedding", True)
+        
         if settings.embedding_provider == "openai":
-            return OpenAIEmbeddingService(settings)
+            if use_optimized:
+                logger.info("Using optimized OpenAI embedding service with parallel processing")
+                return OptimizedOpenAIEmbeddingService(settings)
+            else:
+                logger.info("Using standard OpenAI embedding service")
+                return OpenAIEmbeddingService(settings)
         # Add more providers here when needed
         return None
