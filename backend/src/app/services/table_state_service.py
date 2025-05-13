@@ -6,7 +6,6 @@ import os
 import sqlite3
 from datetime import datetime
 from typing import Dict, List, Optional, Any
-from functools import lru_cache
 
 from app.core.config import get_settings
 from app.models.table_state import TableState
@@ -153,7 +152,6 @@ class TableStateService:
             conn.close()
     
     @staticmethod
-    @lru_cache(maxsize=100)
     def get_table_state(table_id: str) -> Optional[TableState]:
         """Get a table state by ID from the SQLite database."""
         # Check cache first

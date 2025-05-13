@@ -1664,6 +1664,59 @@ export const useStore = create<Store>()(
             // Update document status if changed
             get().updateDocumentStatus(documentId, result.status);
             
+            // ADDED: Also update the document status in table state
+            const { activeTableId, getTable, editTable } = get();
+            if (activeTableId) {
+              const table = getTable(activeTableId);
+              
+              // Check if any rows need to be updated
+              let rowsUpdated = false;
+              
+              // Create a copy of the rows array to modify
+              const updatedRows = [...table.rows];
+              
+              // Find rows with this document and update their status
+              updatedRows.forEach(row => {
+                if (row.sourceData?.type === 'document' &&
+                    row.sourceData.document?.id === documentId &&
+                    row.sourceData.document.status !== result.status) {
+                  
+                  // Mark that we found a row to update
+                  rowsUpdated = true;
+                  
+                  // TypeScript safe way to update the status
+                  const docData = row.sourceData as {
+                    type: 'document';
+                    document: {
+                      id: string;
+                      status: "processing" | "completed" | "failed";
+                      [key: string]: any;
+                    }
+                  };
+                  
+                  // Update the status
+                  docData.document.status = result.status as "processing" | "completed" | "failed";
+                }
+              });
+              
+              if (rowsUpdated) {
+                console.log(`Updating document ${documentId} status in table state from processing to ${result.status}`);
+                
+                // Update the table with the modified rows
+                editTable(activeTableId, { rows: updatedRows });
+                
+                // Save the table state to persist the changes
+                get().saveTableState().catch(error => {
+                  console.error('Failed to save table state after updating document status:', error);
+                });
+                
+                // Save table state
+                get().saveTableState().catch(error => {
+                  console.error('Failed to save table state after updating document status:', error);
+                });
+              }
+            }
+            
             // Show notification on completion or failure
             if (result.status === 'completed') {
               notifications.show({
@@ -1684,7 +1737,7 @@ export const useStore = create<Store>()(
         }
       },
 
-      pollDocumentStatus: async (documentId, interval = 3000, maxAttempts = 20) => {
+      pollDocumentStatus: async (documentId, interval = 3000, maxAttempts = 80) => {
         let attempts = 0;
         
         const poll = async () => {

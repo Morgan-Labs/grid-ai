@@ -144,7 +144,7 @@ class PDFLoader(LoaderService):
         """Detect if a PDF is text-based, scanned, or mixed."""
         # Quick check based on file size
         file_size = os.path.getsize(file_path)
-        if file_size > 10_000_000:  # 10MB
+        if file_size > 20_000_000:  # 20MB
             logger.info(f"Large PDF detected ({file_size} bytes), likely scanned or image-heavy")
             return PDF_TYPE_SCANNED
         

@@ -1,17 +1,18 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { 
-  ActionIcon, 
-  Divider, 
-  Group, 
-  MantineProvider, 
-  Paper, 
-  Text, 
-  Tooltip 
+import { useEffect } from "react";
+import {
+  ActionIcon,
+  Divider,
+  Group,
+  MantineProvider,
+  Paper,
+  Text,
+  Tooltip
 } from "@mantine/core";
 import { ModalsProvider } from "@mantine/modals";
-import { 
-  IconDatabase, 
-  IconMoon, 
+import {
+  IconDatabase,
+  IconMoon,
   IconSun
 } from "@tabler/icons-react";
 import "@mantine/core/styles.css";
@@ -23,11 +24,38 @@ import { useStore } from "@config/store";
 import { KtTable, KTFileDrop, KtSwitch, KtControls } from "@components";
 import { AuthWrapper } from "./components/auth";
 import { KtAutoPersistence } from "./components/kt/kt-auto-persistence";
+import { updateDocumentStatusesInTableState } from "./utils/updateDocumentStatuses";
 import "./app.css";
 
 export function App() {
   const theme = useTheme();
   const colorScheme = useStore(store => store.colorScheme);
+  const isAuthenticated = useStore(store => store.auth.isAuthenticated);
+  
+  // Update document statuses when the app initializes and the user is authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      // Wait for the table state to be loaded first
+      const loadAndUpdate = async () => {
+        try {
+          // First, load the latest table state
+          await useStore.getState().loadLatestTableState();
+          
+          // Add a small delay to ensure the table state is fully loaded
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Then update document statuses - prioritize backend status over table state
+          console.log("Checking document statuses from backend API...");
+          await updateDocumentStatusesInTableState();
+          console.log("Document status check completed");
+        } catch (error) {
+          console.error("Error updating document statuses:", error);
+        }
+      };
+      
+      loadAndUpdate();
+    }
+  }, [isAuthenticated]);
   
   return (
     <QueryClientProvider client={queryClient}>

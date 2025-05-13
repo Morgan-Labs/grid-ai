@@ -124,7 +124,13 @@ export async function saveTableState(tableId: string, tableName: string, tableDa
     
     // More detailed logging about the response
     console.log(`Save table state response: ${response.status} ${response.statusText}`);
-    // console.log(`Response headers: ${JSON.stringify([...response.headers.entries()])}`);
+    
+    // Handle 409 Conflict errors (table state already exists)
+    if (response.status === 409) {
+      console.log(`Table state ${tableId} already exists, updating instead`);
+      // Fall back to updating the existing table state
+      return await updateTableState(tableId, tableData);
+    }
     
     if (!response.ok) {
       let errorMessage = 'Failed to save table state';
@@ -164,7 +170,7 @@ export async function saveTableState(tableId: string, tableName: string, tableDa
  * @param tableData The updated table data
  * @returns The updated table state
  */
-export async function updateTableState(tableId: string, tableData: any): Promise<TableState> {
+export async function updateTableState(tableId: string, tableData: any, tableName?: string): Promise<TableState> {
   try {
     const token = useStore.getState().auth.token;
     
@@ -175,10 +181,21 @@ export async function updateTableState(tableId: string, tableData: any): Promise
     // Log the API endpoint and headers for debugging
     const headers = getAuthHeaders();
     
+    // Extract name from tableData if it exists and tableName is not provided
+    // This handles the case when the store calls this function without the tableName parameter
+    if (tableName === undefined && tableData && typeof tableData === 'object' && 'name' in tableData) {
+      tableName = tableData.name;
+    }
+    
     // Prepare the data with size optimization for large tables
-    const payload = {
+    const payload: { data: any; name?: string } = {
       data: tableData
     };
+    
+    // Include the name in the payload if provided
+    if (tableName !== undefined) {
+      payload.name = tableName;
+    }
     
     // Check payload size
     const payloadStr = JSON.stringify(payload);
@@ -203,7 +220,14 @@ export async function updateTableState(tableId: string, tableData: any): Promise
     
     // More detailed logging about the response
     console.log(`Update table state response: ${response.status} ${response.statusText}`);
-    // console.log(`Response headers: ${JSON.stringify([...response.headers.entries()])}`);
+    
+    // Handle 404 errors by creating a new table state
+    if (response.status === 404) {
+      console.log(`Table state ${tableId} not found, creating new one instead`);
+      // Fall back to creating a new table state with the provided name or a default name
+      const nameToUse = tableName || "First Table";
+      return await saveTableState(tableId, nameToUse, tableData);
+    }
     
     if (!response.ok) {
       let errorMessage = 'Failed to update table state';
@@ -231,8 +255,8 @@ export async function updateTableState(tableId: string, tableData: any): Promise
     return responseData;
   } catch (error) {
     console.error('Error updating table state:', error);
-    throw error instanceof TableStateError 
-      ? error 
+    throw error instanceof TableStateError
+      ? error
       : new TableStateError(error instanceof Error ? error.message : 'Unknown error');
   }
 }
@@ -358,6 +382,39 @@ export async function deleteTableState(tableId: string): Promise<void> {
     console.error('Error deleting table state:', error);
     throw error instanceof TableStateError 
       ? error 
+      : new TableStateError(error instanceof Error ? error.message : 'Unknown error');
+  }
+}
+
+/**
+ * Create or update a table state in a single operation
+ * This function will try to update the table state first, and if it doesn't exist,
+ * it will create a new one.
+ *
+ * @param tableId The ID of the table state
+ * @param tableName The name of the table state
+ * @param tableData The data to save
+ * @returns The saved or updated table state
+ */
+export async function createOrUpdateTableState(tableId: string, tableName: string, tableData: any): Promise<TableState> {
+  try {
+    // Try to update first
+    try {
+      return await updateTableState(tableId, tableData, tableName);
+    } catch (error) {
+      // If the error is not a 404, rethrow it
+      if (!(error instanceof TableStateError && error.message.includes('not found'))) {
+        throw error;
+      }
+      
+      // If we get here, the table state doesn't exist, so create it
+      console.log(`Table state ${tableId} not found during createOrUpdate, creating new one`);
+      return await saveTableState(tableId, tableName, tableData);
+    }
+  } catch (error) {
+    console.error('Error in createOrUpdateTableState:', error);
+    throw error instanceof TableStateError
+      ? error
       : new TableStateError(error instanceof Error ? error.message : 'Unknown error');
   }
 }
