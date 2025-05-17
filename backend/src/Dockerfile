@@ -41,17 +41,22 @@ RUN apt-get update && \
         tesseract-ocr tesseract-ocr-eng && \
     rm -rf /var/lib/apt/lists/*
 
-# 7) Install Python dependencies and Gunicorn from wheels
+# 7) Install torch and torchvision from PyPI to get CUDA dependencies
+# This step does NOT use --no-index
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir torch==2.7.0 torchvision==0.22.0
+
+# 8) Install remaining Python dependencies from local wheels
 COPY --from=builder /usr/src/app/wheels /wheels
 COPY --from=builder /usr/src/app/requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt
 
-# 8) Install application wheel from wheels
+# 9) Install application wheel from wheels
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir /wheels/ai_grid_api*.whl
 
-# 9) Optional: spaCy model and cleanup
+# 10) Optional: spaCy model and cleanup
 RUN if pip show unstructured >/dev/null 2>&1; then \
         python -m spacy download en_core_web_sm --no-deps; \
     fi && \
