@@ -18,8 +18,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip setuptools wheel && \
     pip wheel --no-deps --wheel-dir=./wheels -r requirements.txt
 
-# 4) Copy the rest of the project and build your project's wheel
-COPY . .
+# 4) Copy application source code
+# This layer is cached if src/ (and other app source files) haven't changed.
+COPY src/ ./src/
+# This assumes 'src/' contains the package source relative to pyproject.toml.
+# The RUN command on the next lines builds the project's wheel using this copied source.
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip wheel --no-deps --wheel-dir=./wheels .
 
@@ -38,15 +41,21 @@ RUN apt-get update && \
         tesseract-ocr tesseract-ocr-eng && \
     rm -rf /var/lib/apt/lists/*
 
-# 7) Install all wheels + Gunicorn (cache pip)
+# 7) Install Python dependencies and Gunicorn from wheels
 COPY --from=builder /usr/src/app/wheels /wheels
+COPY --from=builder /usr/src/app/requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install /wheels/* gunicorn && \
-    # Optional: spaCy model if unstructured is installed
-    if pip show unstructured >/dev/null 2>&1; then \
+    pip install --no-cache-dir --find-links=/wheels -r /tmp/requirements.txt gunicorn
+
+# 8) Install application wheel from wheels
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir /wheels/ai_grid_api*.whl
+
+# 9) Optional: spaCy model and cleanup
+RUN if pip show unstructured >/dev/null 2>&1; then \
         python -m spacy download en_core_web_sm --no-deps; \
     fi && \
-    rm -rf /wheels
+    rm -rf /wheels /tmp/requirements.txt
 
 # 8) Create data directories, set permissions, and add a non-root user
 RUN mkdir -p /data /tmp/ai_grid_documents && \

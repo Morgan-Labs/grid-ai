@@ -498,11 +498,11 @@ export const useStore = create<Store>()(
               };
               
               editTable(activeTableId, {
-                rows: where(get().getTable(activeTableId).rows, r => r.id === rowId, row => ({
-                  ...row, // Keep existing properties
-                  sourceData, // Update the sourceData
-                  cells: {} // Reset cells
-                }))
+            rows: where(get().getTable(activeTableId).rows, r => r.id === id, row => ({
+              ...row,
+              sourceData,
+              cells: row.cells ?? {}   // ensure we never write `undefined`
+            }))
               });
               
               // Run queries for this row
