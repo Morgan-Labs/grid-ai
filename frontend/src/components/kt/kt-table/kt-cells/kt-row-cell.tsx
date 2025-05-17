@@ -68,16 +68,7 @@ function DocumentStatusBadge({ status }: { status?: string }) {
 
   switch (status) {
     case 'processing':
-      return (
-        <Badge 
-          size="xs" 
-          color="yellow" 
-          variant="filled" 
-          leftSection={<Loader size="xs" color="yellow.9" />}
-        >
-          Processing
-        </Badge>
-      );
+      return null;
     case 'failed':
       return (
         <Badge 

@@ -25,7 +25,7 @@ SearchMethod = Callable[[str, str, List[Rule]], Awaitable[SearchResponse]]
 
 # Concurrency control - increased from 5 to 10 for better throughput
 # This can be adjusted based on server capacity
-MAX_CONCURRENT_QUERIES = 5
+MAX_CONCURRENT_QUERIES = 10
 QUERY_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_QUERIES)
 
 # Retry configuration - reduced delay for faster failure recovery

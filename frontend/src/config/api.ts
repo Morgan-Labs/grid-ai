@@ -874,9 +874,9 @@ async function processIndividualQuery(query: any): Promise<any> {
  * Process a batch of queries using the batch API endpoint with optimized timeout
  */
 async function processBatch(batch: any[]): Promise<any[]> {
-  // Optimized timeout calculation with moderately increased values
-  // Base: 30s + 4s per query, capped at 60s
-  const timeoutMs = Math.min(60000, 30000 + (batch.length * 4000));
+  // Increased timeout calculation
+  // Base: 60s + 10s per query, capped at 300s (5 minutes)
+  const timeoutMs = Math.min(300000, 60000 + (batch.length * 10000));
   
   console.log(`Processing batch of ${batch.length} queries with ${timeoutMs}ms timeout`);
   
@@ -1030,7 +1030,9 @@ export const checkDocumentStatus = async (documentId: string): Promise<{ status:
       method: 'GET',
       headers: getAuthHeaders(),
       credentials: 'include',
-      mode: 'cors'
+      mode: 'cors',
+      // Add cache control to avoid browser caching
+      cache: 'no-cache'
     });
     
     if (!response.ok) {
@@ -1046,6 +1048,6 @@ export const checkDocumentStatus = async (documentId: string): Promise<{ status:
   } catch (error) {
     console.error('Error checking document status:', error);
     // Return a default status if we can't reach the endpoint
-    return { status: 'completed' };
+    return { status: 'unknown' };  // Use 'unknown' instead of 'completed'
   }
 };

@@ -45,9 +45,9 @@ class DocumentStatusCache {
     const now = Date.now();
     const cached = this.cache.get(documentId);
     
-    // If there's an in-progress check for this document, use cached value or default to completed
+    // If there's an in-progress check for this document, use cached value or default to unknown
     if (this.inProgressChecks.has(documentId)) {
-      return cached?.status || 'completed';
+      return cached?.status || 'unknown';  // Use 'unknown' instead of 'completed'
     }
     
     // Return cached value if still valid based on exponential backoff
@@ -71,8 +71,12 @@ class DocumentStatusCache {
     // Mark this document as being checked to prevent parallel checks
     this.inProgressChecks.add(documentId);
     
-    // Otherwise fetch from API
     try {
+      // Add a small random delay to avoid thundering herd problem
+      const jitter = Math.floor(Math.random() * 500);
+      await new Promise(resolve => setTimeout(resolve, jitter));
+      
+      // Fetch from API
       const result = await checkDocumentStatus(documentId);
       
       // Update cache with incremented check count
@@ -91,8 +95,8 @@ class DocumentStatusCache {
         return cached.status;
       }
       
-      // Default to completed on error
-      return 'completed';
+      // Default to unknown on error, not completed
+      return 'unknown';
     } finally {
       // Remove from in-progress checks
       this.inProgressChecks.delete(documentId);

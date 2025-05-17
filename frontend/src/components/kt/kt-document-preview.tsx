@@ -14,7 +14,7 @@ import {
   Badge,
   Tooltip
 } from "@mantine/core";
-import { IconFileText, IconX, IconRefresh, IconCheck, IconAlertTriangle } from "@tabler/icons-react";
+import { IconFileText, IconX, IconRefresh, IconCheck, IconAlertTriangle, IconQuestionMark } from "@tabler/icons-react";
 import { useStore } from "@config/store";
 import { AnswerTableRow } from "@config/store/store.types";
 import { fetchDocumentPreview } from "@config/api";
@@ -61,6 +61,26 @@ const DocumentStatus = ({ status, onRefresh }: { status?: string | null, onRefre
                 onClick={onRefresh}
               >
                 Retry
+              </Button>
+            )}
+          </Group>
+        </Tooltip>
+      );
+    case 'unknown':
+      return (
+        <Tooltip label="Document status could not be determined">
+          <Group gap="xs">
+            <Badge color="gray" size="lg" leftSection={<IconQuestionMark size={14} />}>
+              Unknown
+            </Badge>
+            {onRefresh && (
+              <Button
+                variant="light"
+                size="xs"
+                rightSection={<IconRefresh size={14} />}
+                onClick={onRefresh}
+              >
+                Check
               </Button>
             )}
           </Group>
@@ -321,11 +341,15 @@ export function KtDocumentPreview({ row, onClose }: DocumentPreviewProps) {
                 <IconX size={40} color="red" />
                 <Text mt="md" c="red">{error}</Text>
               </Box>
-            ) : documentStatus === 'processing' ? (
+            ) : documentStatus === 'processing' || documentStatus === 'unknown' ? (
               <Stack>
                 <Box ta="center" py="md">
                   <Loader />
-                  <Text mt="md">Document is still being processed. Preview may be incomplete.</Text>
+                  <Text mt="md">
+                    {documentStatus === 'unknown'
+                      ? 'Document status could not be determined. Try refreshing.'
+                      : 'Document is still being processed. Preview may be incomplete.'}
+                  </Text>
                 </Box>
                 {content.length > 0 && (
                   <Stack>

@@ -788,6 +788,30 @@ async def preview_document_text(
         )
 
 
+@router.options(
+    "/{document_id}/status",
+    status_code=200,
+)
+async def options_document_status_endpoint(
+    request: Request,
+    response: Response,
+    document_id: str,
+):
+    """
+    Handle preflight OPTIONS requests for document status endpoint.
+    """
+    # Set CORS headers for preflight request
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With"
+        response.headers["Access-Control-Max-Age"] = "3600"  # Cache preflight for 60 minutes
+        response.headers["Vary"] = "Origin"  # Important for CDNs and caching
+    
+    return {}
+
 @router.get(
     "/{document_id}/status",
     status_code=status.HTTP_200_OK,

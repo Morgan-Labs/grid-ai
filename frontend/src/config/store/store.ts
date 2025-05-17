@@ -409,10 +409,8 @@ export const useStore = create<Store>()(
             }))
           });
           
-          // Pass option to suppress the "Processing in progress" notification from rerunCells
-          get().rerunRows([id], { suppressInProgressNotification: true });
-          
           // Conditionally show notification based on options
+          // Queries will now be triggered by status updates to 'completed' or manually.
           if (options.showNotification) {
             notifications.show({
               title: 'Document uploaded',
@@ -777,7 +775,7 @@ export const useStore = create<Store>()(
             }))
           });
         }
-      
+        
         const batch = compact(
           cells.map(({ rowId, columnId }) => {
             const key = getCellKey(rowId, columnId);
@@ -1714,6 +1712,20 @@ export const useStore = create<Store>()(
                 get().saveTableState().catch(error => {
                   console.error('Failed to save table state after updating document status:', error);
                 });
+              }
+              
+              // If rows were updated and the new status is 'completed', rerun those rows
+              if (rowsUpdated && result.status === 'completed') {
+                const completedRowIds = updatedRows
+                  .filter(row => row.sourceData?.type === 'document' &&
+                                 row.sourceData.document?.id === documentId &&
+                                 row.sourceData.document.status === 'completed')
+                  .map(row => row.id);
+                
+                if (completedRowIds.length > 0) {
+                  console.log(`Document ${documentId} processing complete. Rerunning rows: ${completedRowIds.join(', ')}`);
+                  get().rerunRows(completedRowIds, { suppressInProgressNotification: true });
+                }
               }
             }
             

@@ -44,12 +44,17 @@ app.add_middleware(
     allow_origin_regex=r"https://(.*\.)?ai-grid\.onrender\.com",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With", 
-                  "Access-Control-Request-Method", "Access-Control-Request-Headers",
-                  "DNT", "If-Modified-Since", "Cache-Control", "Range"],
+    allow_headers=["*"],  # Allow all headers for simplicity
     expose_headers=["Content-Length", "Content-Range", "Access-Control-Allow-Origin"],
     max_age=3600,  # Cache preflight requests for 60 minutes
 )
+
+# Add Vary: Origin header to all responses
+@app.middleware("http")
+async def add_vary_header(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Vary"] = "Origin"
+    return response
 
 
 # Add middleware to ensure CORS headers are always present
@@ -66,26 +71,38 @@ class EnsureCORSMiddleware(BaseHTTPMiddleware):
         Returns:
             Response: The response with CORS headers.
         """
+        # Get the origin header
+        origin = request.headers.get("Origin")
+        
         # Special handling for OPTIONS requests (preflight)
         if request.method == "OPTIONS":
-            # Get the origin header
-            origin = request.headers.get("Origin")
-            
-            
             # Create a new response with CORS headers
             response = Response(status_code=200)
             
             # Set CORS headers - be permissive for OPTIONS requests
             if origin:
-                response.headers["Access-Control-Allow-Origin"] = origin
-                response.headers["Access-Control-Allow-Credentials"] = "true"
-                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers, DNT, If-Modified-Since, Cache-Control, Range"
-                response.headers["Access-Control-Max-Age"] = "3600" # 1 hour cache for preflight
+                # Check if origin is in allowed origins
+                if origin in settings.backend_cors_origins or settings.environment == "dev":
+                    response.headers["Access-Control-Allow-Origin"] = origin
+                    response.headers["Access-Control-Allow-Credentials"] = "true"
+                    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+                    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers, DNT, If-Modified-Since, Cache-Control, Range"
+                    response.headers["Access-Control-Max-Age"] = "3600" # 1 hour cache for preflight
+                    response.headers["Vary"] = "Origin"  # Important for CDNs and caching
             
+            # Special handling for document endpoints
             if "/api/v1/document" in request.url.path:
                 logger.info(f"Special handling for document endpoint: {request.url.path}")
                 # Ensure all necessary headers are present for document endpoints
+                response.headers["Access-Control-Allow-Origin"] = origin if origin else "*"
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers, DNT, If-Modified-Since, Cache-Control, Range"
+                response.headers["Vary"] = "Origin"
+                
+            # Special handling for table state endpoints
+            if "/api/v1/table-state" in request.url.path:
+                logger.info(f"Special handling for table state endpoint: {request.url.path}")
                 response.headers["Access-Control-Allow-Origin"] = origin if origin else "*"
                 response.headers["Access-Control-Allow-Credentials"] = "true"
                 response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
@@ -99,18 +116,18 @@ class EnsureCORSMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             
             # Ensure CORS headers are present for all responses
-            origin = request.headers.get("Origin")
             if origin:
                 # Only set specific origin, not wildcard, when credentials are used
                 response.headers["Access-Control-Allow-Origin"] = origin
                 response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Vary"] = "Origin"  # Important for CDNs and caching
                 
                 # Add these headers for non-OPTIONS requests too
                 response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
                 response.headers["Access-Control-Expose-Headers"] = "Content-Length, Content-Range, Access-Control-Allow-Origin"
                 
                 # Special handling for document endpoints in regular requests too
-                if "/api/v1/document" in request.url.path:
+                if "/api/v1/document" in request.url.path or "/api/v1/table-state" in request.url.path:
                     response.headers["Vary"] = "Origin"
             
             return response
@@ -119,16 +136,25 @@ class EnsureCORSMiddleware(BaseHTTPMiddleware):
             if str(e) == "No response returned.":
                 # Create a new response with CORS headers
                 response = Response(status_code=204)  # No Content
-                origin = request.headers.get("Origin")
                 if origin:
                     response.headers["Access-Control-Allow-Origin"] = origin
                     response.headers["Access-Control-Allow-Credentials"] = "true"
+                    response.headers["Vary"] = "Origin"
                     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
                     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
                 return response
             else:
                 # Re-raise other runtime errors
                 raise
+        except Exception as e:
+            logger.error(f"Error in CORS middleware: {e}")
+            # Create a new response with CORS headers
+            response = Response(status_code=500, content={"detail": str(e)})
+            if origin:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Vary"] = "Origin"
+            return response
 
 # Add the CORS middleware
 app.add_middleware(EnsureCORSMiddleware)
