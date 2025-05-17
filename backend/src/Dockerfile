@@ -56,7 +56,7 @@ RUN mkdir -p /data /tmp/ai_grid_documents && \
 USER appuser
 
 # 9) Healthcheck and start command
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=30s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8000/ping || exit 1
 
 CMD ["gunicorn", "app.main:app", "-k", "uvicorn.workers.UvicornWorker", \

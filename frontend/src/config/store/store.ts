@@ -403,9 +403,9 @@ export const useStore = create<Store>()(
           // Update only the sourceData, preserving existing cells
           editTable(activeTableId, {
             rows: where(get().getTable(activeTableId).rows, r => r.id === id, row => ({
-              ...row, // Keep existing properties
-              sourceData, // Update the sourceData
-              cells: {} // Reset cells
+              ...row,
+              sourceData,
+              cells: row.cells ?? {} // Preserve existing cells
             }))
           });
           
