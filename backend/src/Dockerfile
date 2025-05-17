@@ -45,7 +45,7 @@ RUN apt-get update && \
 COPY --from=builder /usr/src/app/wheels /wheels
 COPY --from=builder /usr/src/app/requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir --find-links=/wheels -r /tmp/requirements.txt gunicorn
+    pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt
 
 # 8) Install application wheel from wheels
 RUN --mount=type=cache,target=/root/.cache/pip \

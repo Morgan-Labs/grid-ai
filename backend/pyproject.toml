@@ -99,6 +99,7 @@ dependencies = [
     "urllib3>=2.2.3",
     "uvicorn>=0.30.6",
     "yarl>=1.11.1",
+    "gunicorn>=23.0.0,<24.0.0",
 ]
 dynamic = ["version"]
 

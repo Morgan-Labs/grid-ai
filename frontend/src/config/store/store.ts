@@ -498,7 +498,7 @@ export const useStore = create<Store>()(
               };
               
               editTable(activeTableId, {
-            rows: where(get().getTable(activeTableId).rows, r => r.id === id, row => ({
+            rows: where(get().getTable(activeTableId).rows, (r: AnswerTableRow) => r.id === rowId, row => ({
               ...row,
               sourceData,
               cells: row.cells ?? {}   // ensure we never write `undefined`
