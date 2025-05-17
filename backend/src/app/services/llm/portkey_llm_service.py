@@ -49,9 +49,9 @@ class PortkeyLLMService(CompletionService):
         # Virtual keys for different providers
         self.provider_keys = {
             "openai": "openai-6a3e17",
-            "anthropic": "anthropic-a27fda",
+            "anthropic": "bedrock-d2433f",
             "gemini": "gemini-3161fc",
-            "bedrock": "bedrock-77eded"
+            "bedrock": "bedrock-d2433f"
         }
 
     async def generate_completion(

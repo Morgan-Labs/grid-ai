@@ -341,7 +341,7 @@ async def process_queries_in_parallel(
             # Configure LLM service
             # Provider keys for all providers
             provider_keys = {
-                "anthropic": "anthropic-a27fda",
+                "anthropic": "bedrock-d2433f",
                 "gemini": "gemini-3161fc", 
                 "openai": "openai-6a3e17"
             }

@@ -141,10 +141,10 @@ def configure_llm_service(
     
     # Get the appropriate virtual key based on provider
     provider_keys = {
-        "anthropic": "anthropic-a27fda",
+        "anthropic": "bedrock-d2433f",
         "gemini": "gemini-3161fc", 
         "openai": "openai-6a3e17",
-        "bedrock": "bedrock-77eded"
+        "bedrock": "bedrock-d2433f"
     }
     
     virtual_key = provider_keys.get(provider)

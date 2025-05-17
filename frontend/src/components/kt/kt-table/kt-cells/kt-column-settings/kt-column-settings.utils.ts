@@ -56,7 +56,7 @@ export const llmOptions: LLMOption[] = [
   { provider: "bedrock", model: "us.anthropic.claude-3-5-haiku-20241022-v1:0", label: "Claude 3.5 Opus" },
 
   // Google models
-  { provider: "gemini", model: "gemini-2.5-pro-exp-03-25", label: "Gemini 2.5 Pro Exp" },
+  // { provider: "gemini", model: "gemini-2.5-pro-exp-03-25", label: "Gemini 2.5 Pro Exp" },
   { provider: "gemini", model: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
   { provider: "gemini", model: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite" },
   { provider: "gemini", model: "gemini-1.5-flash", label: "Gemini 1.5 Flash" }
