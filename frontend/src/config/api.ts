@@ -79,33 +79,87 @@ export const API_ENDPOINTS = {
 };
 
 import { useStore } from './store';
+// Base request configuration with CORS settings
+const getBaseConfig = (): Omit<RequestInit, 'headers'> => ({
+  credentials: 'include' as const, // Include credentials (cookies) in cross-origin requests
+  mode: 'cors' as const, // Enable CORS mode
+  cache: 'no-cache' as const, // Prevent caching of requests
+  redirect: 'follow' as const, // Follow redirects
+  referrerPolicy: 'no-referrer-when-downgrade' as const, // Send referrer for same-origin requests
+});
+
+// Helper type for headers
+type HeadersType = Record<string, string>;
+
 // Function to get headers with authentication token
-export const getAuthHeaders = () => {
+export const getAuthHeaders = (): HeadersType => {
   const token = useStore.getState().auth.token;
-  
-  return {
+  const headers: HeadersType = {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
-    // Don't include Origin header as it can cause CORS issues
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
   };
-};
-// Default request headers
-export const DEFAULT_HEADERS = {
-  'Content-Type': 'application/json',
-};
-// Function to get upload headers with authentication token
-export const getUploadHeaders = () => {
-  const token = useStore.getState().auth.token;
   
-  return {
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  
+  return headers;
+};
+
+// Default request headers
+export const DEFAULT_HEADERS: HeadersType = {
+  'Content-Type': 'application/json',
+  'Accept': 'application/json',
+};
+
+// Function to get upload headers with authentication token
+export const getUploadHeaders = (): HeadersType => {
+  const token = useStore.getState().auth.token;
+  const headers: HeadersType = {
     'Accept': 'application/json',
-    // Don't include Origin header as it can cause CORS issues
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+  
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  
+  return headers;
+};
+
+// Helper function to create request options with CORS settings
+export const createRequestOptions = (method: string, customHeaders: HeadersType = {}): RequestInit => {
+  const headers = {
+    ...DEFAULT_HEADERS,
+    ...customHeaders
+  };
+
+  return {
+    ...getBaseConfig(),
+    method,
+    headers: new Headers(headers as Record<string, string>)
   };
 };
+
+// Helper function for making fetch requests with CORS support
+export const fetchWithCors = async (url: string, options: RequestInit = {}): Promise<Response> => {
+  const response = await fetch(url, {
+    ...getBaseConfig(),
+    ...options,
+    headers: new Headers({
+      ...DEFAULT_HEADERS,
+      ...(options.headers ? Object.fromEntries(new Headers(options.headers as HeadersInit).entries()) : {})
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  return response;
+};
+
 // File upload headers
-export const UPLOAD_HEADERS = {
+export const UPLOAD_HEADERS: HeadersInit = {
   'Accept': 'application/json',
 };
 // Request timeout in milliseconds
@@ -123,33 +177,16 @@ export const uploadFile = async (file: File): Promise<any> => {
   const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minute timeout for uploads
   
   try {
-    // Make a preflight OPTIONS request first to ensure CORS is set up
-    try {
-      console.log('Sending preflight OPTIONS request');
-      const preflightResponse = await fetch(API_ENDPOINTS.DOCUMENT_UPLOAD, {
-        method: 'OPTIONS',
-        headers: {
-          'Origin': window.location.origin,
-          'Access-Control-Request-Method': 'POST',
-          'Access-Control-Request-Headers': 'Content-Type, Authorization'
-        },
-        mode: 'cors'
-      });
-      
-      console.log('OPTIONS response status:', preflightResponse.status);
-    } catch (preflightError) {
-      console.warn('OPTIONS preflight request failed:', preflightError);
-      // Continue anyway - the actual request might still work
-    }
-    
-    // Make the actual upload request
-    const response = await fetch(API_ENDPOINTS.DOCUMENT_UPLOAD, {
+    // Use our fetchWithCors helper which includes proper CORS headers and error handling
+    const response = await fetchWithCors(API_ENDPOINTS.DOCUMENT_UPLOAD, {
       method: 'POST',
       body: formData,
-      credentials: 'include',
-      headers: getUploadHeaders(),
       signal: controller.signal,
-      mode: 'cors'
+      // Don't set Content-Type header - let the browser set it with the correct boundary
+      headers: new Headers({
+        ...getUploadHeaders(),
+        'Content-Type': undefined as unknown as string // This will let the browser set the correct Content-Type with boundary
+      })
     });
     
     // Clear the timeout
@@ -162,31 +199,22 @@ export const uploadFile = async (file: File): Promise<any> => {
         .join(', ')
     );
     
-    if (!response.ok) {
-      // Try to get more error information
-      let errorDetails = response.statusText;
-      try {
-        const errorText = await response.text();
-        errorDetails = errorText || errorDetails;
-      } catch (e) {
-        // Ignore error reading the error response
-      }
-      
-      throw new ApiError(`Failed to upload file: ${errorDetails}`, response.status);
-    }
-    
     return response.json();
   } catch (error) {
     // Clean up timeout if there's an error
     clearTimeout(timeoutId);
     
-    if (error instanceof Error && error.name === 'AbortError') {
-      console.error('Upload timed out after 10 minutes');
-      throw new ApiError('Upload timed out after 10 minutes', 408);
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        console.error('Upload timed out after 10 minutes');
+        throw new ApiError('Upload timed out after 10 minutes', 408);
+      }
+      
+      console.error('Error uploading file:', error);
+      throw error;
     }
     
-    console.error('Error uploading file:', error);
-    throw error;
+    throw new ApiError('Unknown error occurred during file upload', 500);
   }
 };
 export const uploadFiles = async (files: File[]): Promise<any> => {
@@ -204,33 +232,16 @@ export const uploadFiles = async (files: File[]): Promise<any> => {
   const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minute timeout for batch uploads
   
   try {
-    // Make a preflight OPTIONS request first to ensure CORS is set up
-    try {
-      console.log('Sending batch preflight OPTIONS request');
-      const preflightResponse = await fetch(API_ENDPOINTS.BATCH_DOCUMENT_UPLOAD, {
-        method: 'OPTIONS',
-        headers: {
-          'Origin': window.location.origin,
-          'Access-Control-Request-Method': 'POST',
-          'Access-Control-Request-Headers': 'Content-Type, Authorization'
-        },
-        mode: 'cors'
-      });
-      
-      console.log('Batch OPTIONS response status:', preflightResponse.status);
-    } catch (preflightError) {
-      console.warn('Batch OPTIONS preflight request failed:', preflightError);
-      // Continue anyway - the actual request might still work
-    }
-    
-    // Make the actual upload request
-    const response = await fetch(API_ENDPOINTS.BATCH_DOCUMENT_UPLOAD, {
+    // Use our fetchWithCors helper which includes proper CORS headers and error handling
+    const response = await fetchWithCors(API_ENDPOINTS.BATCH_DOCUMENT_UPLOAD, {
       method: 'POST',
       body: formData,
-      credentials: 'include',
-      headers: getUploadHeaders(),
       signal: controller.signal,
-      mode: 'cors'
+      // Don't set Content-Type header - let the browser set it with the correct boundary
+      headers: new Headers({
+        ...getUploadHeaders(),
+        'Content-Type': undefined as unknown as string // This will let the browser set the correct Content-Type with boundary
+      })
     });
     
     // Clear the timeout
@@ -238,31 +249,22 @@ export const uploadFiles = async (files: File[]): Promise<any> => {
     
     console.log('Batch upload response status:', response.status);
     
-    if (!response.ok) {
-      // Try to get more error information
-      let errorDetails = response.statusText;
-      try {
-        const errorText = await response.text();
-        errorDetails = errorText || errorDetails;
-      } catch (e) {
-        // Ignore error reading the error response
-      }
-      
-      throw new ApiError(`Failed to upload files: ${errorDetails}`, response.status);
-    }
-    
     return response.json();
   } catch (error) {
     // Clean up timeout if there's an error
     clearTimeout(timeoutId);
     
-    if (error instanceof Error && error.name === 'AbortError') {
-      console.error('Batch upload timed out after 3 minutes');
-      throw new ApiError('Batch upload timed out after 3 minutes', 408);
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        console.error('Batch upload timed out after 3 minutes');
+        throw new ApiError('Batch upload timed out after 3 minutes', 408);
+      }
+      
+      console.error('Error uploading files:', error);
+      throw error;
     }
     
-    console.error('Error uploading files:', error);
-    throw error;
+    throw new ApiError('Unknown error occurred during batch file upload', 500);
   }
 };
 export const runQuery = async (row: any, column: any, globalRules: any = []): Promise<any> => {

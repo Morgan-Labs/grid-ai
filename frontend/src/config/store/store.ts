@@ -11,7 +11,8 @@ import {
   isNil,
   keyBy,
   mapValues,
-  omit
+  omit,
+
 } from "lodash-es";
 import cuid from "@bugsnag/cuid";
 import {
@@ -23,7 +24,7 @@ import {
   isArrayType,
   toSingleType
 } from "./store.utils";
-import { AnswerTableRow, ResolvedEntity, SourceData, Store } from "./store.types";
+import { AnswerTableRow, ResolvedEntity, SourceData, Store, AnswerTable } from "./store.types";
 // Import API_ENDPOINTS
 import { runBatchQueries, uploadFile, API_ENDPOINTS, checkDocumentStatus } from "../api";
 import { AuthError, login as apiLogin, verifyToken } from "../../services/api/auth";
@@ -34,6 +35,21 @@ import {
 } from "../../services/api/table-state";
 import { notifications } from "../../utils/notifications";
 import { insertAfter, insertBefore, where } from "@utils/functions";
+
+// Helper function to transform table data to match backend expectations
+const transformTableForBackend = (table: any): any => {
+  // Return the core table structure expected by the backend
+  // Ensure only serializable data is included
+  return {
+    id: table.id,
+    name: table.name,
+    columns: table.columns || [],
+    rows: table.rows || [],
+    globalRules: table.globalRules || [],
+    filters: table.filters || [],
+    // Exclude transient frontend state like chunks, openedChunks, loadingCells
+  };
+};
 
 export const useStore = create<Store>()(
   persist(
@@ -188,6 +204,8 @@ export const useStore = create<Store>()(
           tables: [...get().tables, newTable],
           activeTableId: newTable.id
         });
+        // Explicitly save the new table state immediately after creation
+        get().saveTableState(true); // Pass true for isNewTable
       },
 
       editTable: (id, table) => {
@@ -1325,7 +1343,7 @@ export const useStore = create<Store>()(
       _saveTableStateTimer: null as ReturnType<typeof setTimeout> | null,
       
       // Automatic persistence methods
-      saveTableState: async () => {
+      saveTableState: async (isNewTable = false) => {
         const { activeTableId, getTable, auth, _saveTableStateTimer } = get();
         
         // Only save if authenticated
@@ -1349,28 +1367,15 @@ export const useStore = create<Store>()(
               return;
             }
             
-            // Debug info
-            console.log(`Saving table: ${table.id} with ${table.rows.length} rows and ${table.columns.length} columns`);
-            // console.log(`Row cell counts: ${table.rows.slice(0, 3).map(r => Object.keys(r.cells).length).join(', ')}...`);
-            
-            // Check for large data payload
-            const estimatedSize = JSON.stringify(table).length;
-            const megabytes = estimatedSize / (1024 * 1024);
-            // console.log(`Estimated payload size: ${megabytes.toFixed(2)} MB`);
-            
-            // Handle large tables by optimizing the saved data
+            console.log(`Saving table: ${table.id} (isNew: ${isNewTable}) with ${table.rows.length} rows and ${table.columns.length} columns`);
+
             let tableToSave = table;
-            if (table.rows.length > 1000 || megabytes > 10) {
+            if (table.rows.length > 1000 || JSON.stringify(table).length / (1024 * 1024) > 10) {
               console.log('Large table detected, optimizing data for storage');
-              
-              // Create optimized version with only essential data
-              // Start with a clean object and only copy what we need
               tableToSave = {
-                // Core properties that must be preserved
                 id: table.id,
                 name: table.name,
                 columns: table.columns,
-                // Only include essential fields for rows to reduce size
                 rows: table.rows.map(row => ({
                   id: row.id,
                   hidden: row.hidden || false,
@@ -1379,71 +1384,48 @@ export const useStore = create<Store>()(
                 })),
                 globalRules: table.globalRules,
                 filters: table.filters,
-                // Required properties with minimal data
                 chunks: {},
                 openedChunks: [],
                 loadingCells: {},
                 uploadingFiles: false
               };
-              
               console.log('Table optimized for storage, removed temporary data');
             }
             
             try {
-              // Try direct update first (most common case)
-              try {
-                // console.log(`Attempting direct update for table ${table.id}`);
-                await apiUpdateTableState(table.id, tableToSave);
-                // console.log('Table state update successful via direct PUT');
-                return;
-              } catch (updateError) {
-                // If update fails, provide detailed error
-                console.warn(`Update error: ${updateError instanceof Error ? updateError.message : 'Unknown error'}`);
-                
-                // If it's a 404, create a new table state
-                if (updateError instanceof Error && updateError.message.includes('not found')) {
-                  console.log(`Table ${table.id} not found, creating new table state`);
-                  await apiSaveTableState(table.id, table.name, tableToSave);
-                  console.log('Table state created successfully via POST');
-                  return;
-                }
-                
-                // For other errors, use the fallback with explicit existence check
-                console.log('Direct update failed, checking if table exists...');
-                
-                // Fallback: check if the table state exists by listing all table states
-                const response = await listTableStates();
-                const existingState = response.items?.find(item => item.id === table.id);
-                
-                if (existingState) {
-                  // If it exists, update it
-                  console.log(`Table ${table.id} found in list, updating`);
-                  await apiUpdateTableState(table.id, tableToSave);
-                  console.log('Table state updated successfully via fallback PUT');
-                } else {
-                  // If it doesn't exist, create a new one
-                  console.log(`Table ${table.id} not found in list, creating`);
-                  await apiSaveTableState(table.id, table.name, tableToSave);
-                  console.log('Table state created successfully via fallback POST');
-                }
+              if (isNewTable) {
+                console.log(`Attempting to create new table state (POST) for ${table.id}`);
+                await apiSaveTableState(table.id, table.name, transformTableForBackend(tableToSave));
+                console.log('Table state created successfully via POST');
+              } else {
+                console.log(`Attempting to update existing table state (PUT) for ${table.id}`);
+                await apiUpdateTableState(table.id, transformTableForBackend(tableToSave));
+                console.log('Table state update successful via PUT');
               }
             } catch (apiError) {
-              // Log the error with more details
-              console.error('API error saving table state:', apiError);
-              console.error('Error details:', apiError instanceof Error ? apiError.message : 'Unknown error');
+              console.error(`API error during saveTableState for table ${table.id} (isNew: ${isNewTable}):`, apiError);
+              // No automatic retrying with a different verb here to prevent loops.
+              // If a POST fails for a new table, or PUT fails for an existing table, it's a genuine error to be investigated.
+              if (apiError instanceof Error && apiError.message.includes('already exists') && isNewTable) {
+                  // This can happen if a previous attempt to create timed out or had a network hiccup,
+                  // but the record was actually created. In this case, we can try to update it.
+                  console.warn(`POST for new table ${table.id} failed (conflict), attempting PUT as a one-time recovery.`);
+                  try {
+                      await apiUpdateTableState(table.id, transformTableForBackend(tableToSave));
+                      console.log('Table state recovery update successful via PUT.');
+                  } catch (putError) {
+                      console.error('Recovery PUT failed after POST conflict:', putError);
+                  }
+              }
             }
           } catch (error) {
             console.error('Error preparing table state for save:', error);
-            console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
           } finally {
-            // Clear the timer reference
             set({ _saveTableStateTimer: null });
           }
-        }, 500); // Reduced from 2000ms to 500ms for more responsive saving
+        }, 500);
         
-        // Store the timer
         set({ _saveTableStateTimer: timer });
-        
         return Promise.resolve();
       },
       
@@ -1474,23 +1456,104 @@ export const useStore = create<Store>()(
               new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
             );
             
-            // Load all table states into the store
-            const tables = sortedStates.map(state => ({
-              id: state.id,
-              name: state.name,
-              columns: state.data.columns || [],
-              rows: state.data.rows || [],
-              globalRules: state.data.globalRules || [],
-              filters: state.data.filters || [],
-              chunks: state.data.chunks || {},
-              openedChunks: state.data.openedChunks || [],
-              loadingCells: {},
-              uploadingFiles: false
-            }));
-            
+            // Process table states to match store structure
+            const tables = sortedStates.map(state => {
+              // Initialize default structure using AnswerTable type
+              const defaultTableStructure: AnswerTable = {
+                id: state.id,
+                name: state.name,
+                columns: [],
+                rows: [],
+                globalRules: [],
+                filters: [],
+                chunks: {}, 
+                openedChunks: [],
+                loadingCells: {}, 
+                uploadingFiles: false,
+                requestProgress: { total: 0, completed: 0, inProgress: false }
+              };
+              
+              // Check if the response data is valid and has the expected nested structure
+              if (state.data && typeof state.data === 'object' && !Array.isArray(state.data) && state.data.rows && state.data.columns) {
+                // Assume state.data has the structure we expect, even if typed as Any
+                const data = state.data as Partial<AnswerTable>; // Cast to allow accessing potential properties
+                
+                // Directly use the nested data from the backend
+                const loadedTable: AnswerTable = { 
+                  ...defaultTableStructure, 
+                  id: data.id || state.id, 
+                  name: data.name || state.name, 
+                  // Process columns: ensure it's an array and merge each item with defaults
+                  columns: (Array.isArray(data.columns) ? data.columns : []).map(colData => ({ 
+                    ...getBlankColumn(), // Start with defaults
+                    ...(colData || {}),   // Spread loaded column data, handle null/undefined
+                    rules: Array.isArray(colData?.rules) ? colData.rules : [] // Ensure rules is initialized
+                  })),
+                  // Process rows: ensure it's an array and merge each item with defaults
+                  rows: (Array.isArray(data.rows) ? data.rows : []).map(rowData => ({ 
+                    ...getBlankRow(),    // Start with defaults
+                    ...(rowData || {})  // Spread loaded row data, handle null/undefined
+                  })),
+                  globalRules: Array.isArray(data.globalRules) ? data.globalRules : [],
+                  filters: Array.isArray(data.filters) ? data.filters : [],
+                  // Transient state is always default
+                  chunks: {},
+                  openedChunks: [],
+                  loadingCells: {},
+                  uploadingFiles: false,
+                  requestProgress: { total: 0, completed: 0, inProgress: false }
+                };
+                return loadedTable;
+              } else if (Array.isArray(state.data) && state.data.length > 0) {
+                // Handle the flat format (array of row objects)
+                const flatData = state.data as Record<string, any>[];
+                const firstRow = flatData[0];
+                
+                // Reconstruct columns from the keys of the first row
+                const columns = Object.keys(firstRow).map(key => ({
+                  ...getBlankColumn(),
+                  id: key, // Use the key as the column ID
+                  entityType: key, // Use the key as the default entityType/name
+                  query: key, // Use the key as the default query
+                  rules: [] // Ensure rules is initialized
+                }));
+                
+                // Map flat data to the expected rows structure
+                const rows = flatData.map(flatRow => ({
+                  ...getBlankRow(),
+                  cells: flatRow // The flat row object directly maps to the cells
+                }));
+                
+                const loadedTable: AnswerTable = { 
+                  ...defaultTableStructure, 
+                  id: state.id, 
+                  name: state.name, 
+                  columns: columns,
+                  rows: rows,
+                  // Reset other potentially persisted state that doesn't apply to flat format
+                  globalRules: [], 
+                  filters: [],
+                  // Transient state is always default
+                  chunks: {},
+                  openedChunks: [],
+                  loadingCells: {},
+                  uploadingFiles: false,
+                  requestProgress: { total: 0, completed: 0, inProgress: false }
+                };
+                return loadedTable;
+              } else {
+                // Log warning only if data exists but is neither nested nor a non-empty array
+                if (state.data !== null && state.data !== undefined) {
+                  console.warn(`Table state ${state.id} has missing or unexpected data format. Using default structure. Data:`, state.data);
+                }
+                // Use default structure if data is null, undefined, empty array, or unexpected object format
+                return defaultTableStructure;
+              }
+            });
+
             // Set all tables and make the most recent one active
             set({
-              tables,
+              tables: tables as Store['tables'], // Keep type assertion here
               activeTableId: tables.length > 0 ? tables[0].id : get().activeTableId,
               isLoading: false
             });

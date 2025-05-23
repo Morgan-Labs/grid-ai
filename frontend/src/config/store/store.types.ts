@@ -23,7 +23,7 @@ export interface Store {
   // Document methods
   addDocument: (document: Document) => void;
   updateDocumentStatus: (documentId: string, status: string) => void;
-  checkDocumentStatus: (documentId: string) => Promise<void>;
+  checkDocumentStatus: (documentId: string) => Promise<{ status: string } | void>;
   pollDocumentStatus: (documentId: string, interval?: number, maxAttempts?: number) => void;
   
   // CSV/Excel import
@@ -88,7 +88,7 @@ export interface Store {
   ingestSingleDocumentById: (documentId: string, rowId: string, originalColumnId: string) => Promise<{ success: boolean }>;
   
   // Table state persistence
-  saveTableState: () => Promise<void>;
+  saveTableState: (isNewTable?: boolean) => Promise<void>;
   loadLatestTableState: () => Promise<void>;
   
   clear: (allTables?: boolean) => void;

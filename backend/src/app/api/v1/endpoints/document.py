@@ -19,6 +19,7 @@ from app.schemas.document_api import (
     BatchFetchResponseSchema,
 )
 from app.services.document_service import DocumentService
+from app.services.document_persistence_service import DocumentPersistenceService
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,19 @@ async def upload_document_endpoint(
             status="processing"  # Indicate that document is still being processed
         )
         
+        # Persist the initial document record
+        try:
+            await DocumentPersistenceService.insert_document(document)
+            logger.info(f"Initial record for document {document_id} inserted into DB with status 'processing'.")
+        except Exception as db_error:
+            logger.error(f"Failed to insert initial record for document {document_id}: {db_error}", exc_info=True)
+            # Decide if this should be a hard failure for the upload endpoint
+            # For now, let's raise an HTTPException as the document cannot be tracked
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create initial document record: {str(db_error)}"
+            )
+
         total_time = time.time() - start_time
         logger.info(f"Document upload accepted in {total_time:.2f} seconds, processing in background")
         return DocumentResponseSchema(**document.model_dump())
@@ -293,6 +307,18 @@ async def batch_upload_documents_endpoint(
                     page_count=10,
                     status="processing"  # Indicate that document is still being processed
                 )
+                # Persist the initial document record for batch
+                try:
+                    await DocumentPersistenceService.insert_document(document)
+                    logger.info(f"Initial record for batch document {document_id} inserted with status 'processing'.")
+                except Exception as db_error:
+                    logger.error(f"Failed to insert initial record for batch document {document_id}: {db_error}", exc_info=True)
+                    # For batch, we might log and continue, or collect errors
+                    # For now, let this error propagate if not handled by outer try-except for the specific file
+                    # The outer try-except in batch_upload_documents_endpoint logs and continues to next file.
+                    # So we can just re-raise to be caught by that if a single DB insert fails.
+                    raise # This will be caught by the per-file try-except in batch_upload_documents_endpoint
+                
                 documents.append(document)
                 
             except Exception as e:

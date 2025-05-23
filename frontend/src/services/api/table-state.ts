@@ -1,5 +1,7 @@
 import { API_ENDPOINTS, getAuthHeaders, ApiError } from '../../config/api';
 import { useStore } from '../../config/store';
+// Import AnswerTable type for use in interfaces and function signatures
+import { AnswerTable } from '../../config/store/store.types';
 
 // Error class for table state API errors
 export class TableStateError extends Error {
@@ -9,18 +11,18 @@ export class TableStateError extends Error {
   }
 }
 
-// Interface for table state data
-export interface TableState {
+// Interface for the API response structure for a single table state
+export interface TableStateApiResponse {
   id: string;
   name: string;
-  data: any;
+  data: AnswerTable; // Use the nested AnswerTable type
   created_at: string;
   updated_at: string;
 }
 
 // Interface for table state list response
 export interface TableStateListResponse {
-  items: TableState[];
+  items: TableStateApiResponse[]; // Use the updated response structure
 }
 
 /**
@@ -80,10 +82,14 @@ const retryFetch = async (
  * Save the current table state to the backend
  * @param tableId The ID of the table to save
  * @param tableName The name of the table
- * @param tableData The table data to save
- * @returns The saved table state
+ * @param tableData The nested table data structure to save (AnswerTable)
+ * @returns The saved table state API response
  */
-export async function saveTableState(tableId: string, tableName: string, tableData: any): Promise<TableState> {
+export async function saveTableState(
+  tableId: string, 
+  tableName: string, 
+  tableData: AnswerTable // Updated type to AnswerTable
+): Promise<TableStateApiResponse> { // Updated return type
   try {
     const token = useStore.getState().auth.token;
     
@@ -91,22 +97,18 @@ export async function saveTableState(tableId: string, tableName: string, tableDa
       throw new TableStateError('Authentication required');
     }
     
-    // Log the API endpoint and headers for debugging
     const headers = getAuthHeaders();
     
-    // Prepare the data with size optimization for large tables
+    // The payload for POST matches TableStateCreate schema
     const payload = {
       id: tableId,
       name: tableName,
-      data: tableData
+      data: tableData // Pass the nested AnswerTable directly
     };
     
-    // Check payload size
     const payloadStr = JSON.stringify(payload);
     const payloadSizeMB = payloadStr.length / (1024 * 1024);
     // console.log(`Table state payload size: ${payloadSizeMB.toFixed(2)} MB`);
-    
-    // If payload is extremely large, implement chunking or compression
     if (payloadSizeMB > 20) {
       console.warn(`Very large payload (${payloadSizeMB.toFixed(2)} MB) detected - this may cause issues with the API`);
     }
@@ -118,37 +120,29 @@ export async function saveTableState(tableId: string, tableName: string, tableDa
         credentials: 'include',
         body: payloadStr
       }),
-      5, // Increased to 5 retries
-      3000 // Increased initial delay to 3 seconds
+      5, 3000
     );
     
-    // More detailed logging about the response
     console.log(`Save table state response: ${response.status} ${response.statusText}`);
-    // console.log(`Response headers: ${JSON.stringify([...response.headers.entries()])}`);
     
     if (!response.ok) {
       let errorMessage = 'Failed to save table state';
       try {
         const responseText = await response.text();
         console.log('Error response body:', responseText);
-        
         try {
           const errorData = JSON.parse(responseText);
           errorMessage = errorData.detail || errorMessage;
         } catch (parseError) {
-          // If we can't parse as JSON, use the raw text
           errorMessage = `Failed to save table state: ${responseText || response.statusText}`;
         }
       } catch (e) {
-        // If we can't read the response at all, just use the status text
         errorMessage = `Failed to save table state: ${response.statusText}`;
       }
       throw new TableStateError(errorMessage);
     }
     
-    // Get the response data and log it for debugging
     const responseData = await response.json();
-    // console.log('Table state saved successfully with ID:', responseData.id);
     return responseData;
   } catch (error) {
     console.error('Error saving table state:', error);
@@ -161,10 +155,13 @@ export async function saveTableState(tableId: string, tableName: string, tableDa
 /**
  * Update an existing table state
  * @param tableId The ID of the table to update
- * @param tableData The updated table data
- * @returns The updated table state
+ * @param tableData The nested table data structure to save (AnswerTable)
+ * @returns The updated table state API response
  */
-export async function updateTableState(tableId: string, tableData: any): Promise<TableState> {
+export async function updateTableState(
+  tableId: string, 
+  tableData: AnswerTable // Updated type to AnswerTable
+): Promise<TableStateApiResponse> { // Updated return type
   try {
     const token = useStore.getState().auth.token;
     
@@ -172,20 +169,16 @@ export async function updateTableState(tableId: string, tableData: any): Promise
       throw new TableStateError('Authentication required');
     }
     
-    // Log the API endpoint and headers for debugging
     const headers = getAuthHeaders();
     
-    // Prepare the data with size optimization for large tables
+    // The payload for PUT matches TableStateUpdate schema (sending just data)
     const payload = {
-      data: tableData
+      data: tableData // Pass the nested AnswerTable directly
     };
     
-    // Check payload size
     const payloadStr = JSON.stringify(payload);
     const payloadSizeMB = payloadStr.length / (1024 * 1024);
     console.log(`Table state update payload size: ${payloadSizeMB.toFixed(2)} MB`);
-    
-    // If payload is extremely large, implement chunking or compression
     if (payloadSizeMB > 20) {
       console.warn(`Very large update payload (${payloadSizeMB.toFixed(2)} MB) detected - this may cause issues with the API`);
     }
@@ -197,37 +190,29 @@ export async function updateTableState(tableId: string, tableData: any): Promise
         credentials: 'include',
         body: payloadStr
       }),
-      5, // Increased to 5 retries
-      3000 // Increased initial delay to 3 seconds
+      5, 3000
     );
     
-    // More detailed logging about the response
     console.log(`Update table state response: ${response.status} ${response.statusText}`);
-    // console.log(`Response headers: ${JSON.stringify([...response.headers.entries()])}`);
     
     if (!response.ok) {
       let errorMessage = 'Failed to update table state';
       try {
         const responseText = await response.text();
         console.log('Error response body:', responseText);
-        
         try {
           const errorData = JSON.parse(responseText);
           errorMessage = errorData.detail || errorMessage;
         } catch (parseError) {
-          // If we can't parse as JSON, use the raw text
           errorMessage = `Failed to update table state: ${responseText || response.statusText}`;
         }
       } catch (e) {
-        // If we can't read the response at all, just use the status text
         errorMessage = `Failed to update table state: ${response.statusText}`;
       }
       throw new TableStateError(errorMessage);
     }
     
-    // Get the response data and log it for debugging
     const responseData = await response.json();
-    // console.log('Table state updated successfully with ID:', responseData.id);
     return responseData;
   } catch (error) {
     console.error('Error updating table state:', error);
@@ -240,15 +225,12 @@ export async function updateTableState(tableId: string, tableData: any): Promise
 /**
  * Get a table state by ID
  * @param tableId The ID of the table to get
- * @returns The table state
+ * @returns The table state API response
  */
-export async function getTableState(tableId: string): Promise<TableState> {
+export async function getTableState(tableId: string): Promise<TableStateApiResponse> { // Updated return type
   try {
     const token = useStore.getState().auth.token;
-    
-    if (!token) {
-      throw new TableStateError('Authentication required');
-    }
+    if (!token) throw new TableStateError('Authentication required');
     
     const response = await retryFetch(
       () => fetch(`${API_ENDPOINTS.API_V1}/table-state/${tableId}`, {
@@ -256,19 +238,14 @@ export async function getTableState(tableId: string): Promise<TableState> {
         headers: getAuthHeaders(),
         credentials: 'include'
       }),
-      5, // 5 retries
-      3000 // 3 seconds initial delay
+      5, 3000
     );
     
     if (!response.ok) {
-      if (response.status === 404) {
-        throw new TableStateError('Table state not found');
-      }
-      
+      if (response.status === 404) throw new TableStateError('Table state not found');
       const errorData = await response.json();
       throw new TableStateError(errorData.detail || 'Failed to get table state');
     }
-    
     return await response.json();
   } catch (error) {
     console.error('Error getting table state:', error);
@@ -280,20 +257,14 @@ export async function getTableState(tableId: string): Promise<TableState> {
 
 /**
  * List all table states
- * @returns A list of table states
+ * @returns A list of table states API response
  */
-export async function listTableStates(): Promise<TableStateListResponse> {
+export async function listTableStates(): Promise<TableStateListResponse> { // Return type uses updated list structure
   try {
     const token = useStore.getState().auth.token;
+    if (!token) throw new TableStateError('Authentication required');
     
-    if (!token) {
-      throw new TableStateError('Authentication required');
-    }
-    
-    // Log the API endpoint and headers for debugging
     const headers = getAuthHeaders();
-    // console.log('Listing table states from:', `${API_ENDPOINTS.API_V1}/table-state/`);
-    // console.log('With headers:', JSON.stringify(headers));
     
     const response = await retryFetch(
       () => fetch(`${API_ENDPOINTS.API_V1}/table-state/`, {
@@ -301,8 +272,7 @@ export async function listTableStates(): Promise<TableStateListResponse> {
         headers: headers,
         credentials: 'include'
       }),
-      5, // Increased to 5 retries
-      3000 // Increased initial delay to 3 seconds
+      5, 3000
     );
     
     console.log('List table states response:', response.status, response.statusText);
@@ -313,12 +283,10 @@ export async function listTableStates(): Promise<TableStateListResponse> {
         const errorData = await response.json();
         errorMessage = errorData.detail || errorMessage;
       } catch (e) {
-        // If we can't parse the error response, just use the status text
         errorMessage = `Failed to list table states: ${response.statusText}`;
       }
       throw new TableStateError(errorMessage);
     }
-    
     return await response.json();
   } catch (error) {
     console.error('Error listing table states:', error);
@@ -335,10 +303,7 @@ export async function listTableStates(): Promise<TableStateListResponse> {
 export async function deleteTableState(tableId: string): Promise<void> {
   try {
     const token = useStore.getState().auth.token;
-    
-    if (!token) {
-      throw new TableStateError('Authentication required');
-    }
+    if (!token) throw new TableStateError('Authentication required');
     
     const response = await retryFetch(
       () => fetch(`${API_ENDPOINTS.API_V1}/table-state/${tableId}`, {
@@ -346,8 +311,7 @@ export async function deleteTableState(tableId: string): Promise<void> {
         headers: getAuthHeaders(),
         credentials: 'include'
       }),
-      5, // 5 retries
-      3000 // 3 seconds initial delay
+      5, 3000
     );
     
     if (!response.ok) {

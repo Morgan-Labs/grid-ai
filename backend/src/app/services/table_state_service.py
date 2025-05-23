@@ -95,11 +95,12 @@ class TableStateService:
     
     @staticmethod
     def save_table_state(table_state: TableState) -> TableState:
-        """Save a table state to the SQLite database."""
+        """Save a table state (with nested data) to the SQLite database."""
         # Update the updated_at timestamp
         table_state.updated_at = datetime.utcnow()
         
-        # Convert the data to a JSON string
+        # Convert the nested data object directly to a JSON string
+        # No specific flattening is needed here
         data_json = json.dumps(table_state.data, default=str)
         
         # Connect to the database
@@ -132,7 +133,7 @@ class TableStateService:
                         table_state.id,
                         table_state.name,
                         table_state.user_id,
-                        data_json,
+                        data_json, # Store the nested JSON string
                         table_state.created_at.isoformat(),
                         table_state.updated_at.isoformat()
                     )
@@ -144,7 +145,7 @@ class TableStateService:
             # Clear the cache
             TableStateService._cache.clear()
             
-            logger.info(f"Saved table state {table_state.id} to database")
+            logger.info(f"Saved table state {table_state.id} (nested data) to database")
             return table_state
         except Exception as e:
             logger.error(f"Error saving table state {table_state.id}: {e}")
@@ -153,11 +154,12 @@ class TableStateService:
             conn.close()
     
     @staticmethod
-    @lru_cache(maxsize=100)
+    @lru_cache(maxsize=100) # Keep cache for performance
     def get_table_state(table_id: str) -> Optional[TableState]:
-        """Get a table state by ID from the SQLite database."""
+        """Get a table state by ID, loading nested data directly."""
         # Check cache first
         if table_id in TableStateService._cache:
+            logger.debug(f"Cache hit for table state {table_id}")
             return TableStateService._cache[table_id]
         
         # Connect to the database
@@ -176,7 +178,7 @@ class TableStateService:
                 logger.warning(f"Table state {table_id} not found in database")
                 return None
             
-            # Parse the JSON data
+            # Parse the JSON string directly into the nested data object
             data = json.loads(row[3])
             
             # Create a TableState object
@@ -184,7 +186,7 @@ class TableStateService:
                 id=row[0],
                 name=row[1],
                 user_id=row[2],
-                data=data,
+                data=data, # Assign the loaded nested dictionary
                 created_at=datetime.fromisoformat(row[4]),
                 updated_at=datetime.fromisoformat(row[5])
             )
@@ -192,8 +194,11 @@ class TableStateService:
             # Cache the result
             TableStateService._cache[table_id] = table_state
             
-            logger.info(f"Loaded table state {table_id} from database")
+            logger.info(f"Loaded table state {table_id} (nested data) from database")
             return table_state
+        except json.JSONDecodeError as json_err:
+            logger.error(f"Error decoding JSON for table state {table_id}: {json_err}. Data was: {row[3]}")
+            return None # Return None if JSON is corrupted
         except Exception as e:
             logger.error(f"Error loading table state {table_id}: {e}")
             return None
@@ -202,13 +207,12 @@ class TableStateService:
     
     @staticmethod
     def list_table_states() -> List[TableState]:
-        """List all table states from the SQLite database."""
+        """List all table states, loading nested data."""
         # Connect to the database
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         try:
-            # Query all table states with a limit to prevent memory issues
             cursor.execute(
                 """
                 SELECT id, name, user_id, data, created_at, updated_at 
@@ -219,27 +223,27 @@ class TableStateService:
             )
             rows = cursor.fetchall()
             
-            # Convert rows to TableState objects
             table_states = []
             for row in rows:
-                # Parse the JSON data
-                data = json.loads(row[3])
-                
-                # Create a TableState object
-                table_state = TableState(
-                    id=row[0],
-                    name=row[1],
-                    user_id=row[2],
-                    data=data,
-                    created_at=datetime.fromisoformat(row[4]),
-                    updated_at=datetime.fromisoformat(row[5])
-                )
-                
-                # Cache the result
-                TableStateService._cache[table_state.id] = table_state
-                table_states.append(table_state)
+                try:
+                    # Parse the JSON string directly into the nested data object
+                    data = json.loads(row[3])
+                    
+                    table_state = TableState(
+                        id=row[0],
+                        name=row[1],
+                        user_id=row[2],
+                        data=data, # Assign the loaded nested dictionary
+                        created_at=datetime.fromisoformat(row[4]),
+                        updated_at=datetime.fromisoformat(row[5])
+                    )
+                    table_states.append(table_state)
+                except json.JSONDecodeError as json_err:
+                    logger.error(f"Error decoding JSON for table state {row[0]} in list: {json_err}. Skipping.")
+                except Exception as e:
+                    logger.error(f"Error processing table state {row[0]} in list: {e}. Skipping.")
             
-            logger.info(f"Listed {len(table_states)} table states from database")
+            logger.info(f"Listed {len(table_states)} table states (nested data) from database")
             return table_states
         except Exception as e:
             logger.error(f"Error listing table states: {e}")

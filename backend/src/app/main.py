@@ -4,7 +4,7 @@ import logging
 import os
 from typing import Any, Dict
 
-from fastapi import Depends, FastAPI, Request, Response
+from fastapi import Depends, FastAPI, Request, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -15,6 +15,7 @@ from app.services.document_service import DocumentService
 from app.services.embedding.factory import EmbeddingServiceFactory
 from app.services.llm.factory import CompletionServiceFactory
 from app.services.vector_db.factory import VectorDBFactory
+from app.services.document_persistence_service import DocumentPersistenceService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,28 +28,44 @@ app = FastAPI(
     redirect_slashes=False,  # Disable automatic redirects for trailing slashes
 )
 
-# Configure CORS with enhanced settings
+# Configure CORS with enhanced security
+# List of allowed origins - update these with your production domains
+ALLOWED_ORIGINS = [
+    "https://ai-grid-ik5o.onrender.com",
+    "https://ai-grid-backend-jvru.onrender.com",
+    "https://grid.mx2.dev",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8000",
+    "http://localhost:8001",
+]
+
+# Add CORS middleware with secure defaults
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://ai-grid-ik5o.onrender.com",
-        "https://ai-grid-backend-jvru.onrender.com",
-        "https://grid.mx2.dev",
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:8000",
-        "http://localhost:8001",
-        # Do not use wildcard with credentials - browsers reject it
-        # "*"
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_origin_regex=r"https://(.*\.)?ai-grid\.onrender\.com",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With", 
-                  "Access-Control-Request-Method", "Access-Control-Request-Headers",
-                  "DNT", "If-Modified-Since", "Cache-Control", "Range"],
-    expose_headers=["Content-Length", "Content-Range", "Access-Control-Allow-Origin"],
-    max_age=3600,  # Cache preflight requests for 60 minutes
+    allow_headers=[
+        "Content-Type", 
+        "Authorization", 
+        "Accept", 
+        "Origin", 
+        "X-Requested-With",
+        "Access-Control-Request-Method", 
+        "Access-Control-Request-Headers",
+        "DNT", 
+        "If-Modified-Since", 
+        "Cache-Control", 
+        "Range"
+    ],
+    expose_headers=[
+        "Content-Length", 
+        "Content-Range", 
+        "Access-Control-Allow-Origin"
+    ],
+    max_age=3600  # Cache preflight requests for 60 minutes
 )
 
 
@@ -185,7 +202,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
         
         # Token is valid, proceed with the request
-        return await call_next(request)
+        try:
+            return await call_next(request)
+        except HTTPException as exc:
+            # If the endpoint raises an HTTPException (like 404), 
+            # return it directly so FastAPI can handle it.
+            return exc
+        except Exception as e:
+            # Catch any other unexpected errors during endpoint execution
+            logger.error(f"Unexpected error during request processing: {e}", exc_info=True)
+            # Return a generic 500 error
+            return Response(
+                content='{"detail":"Internal Server Error"}',
+                status_code=500,
+                media_type="application/json"
+            )
 
 # Add the authentication middleware
 app.add_middleware(AuthMiddleware)
@@ -275,6 +306,13 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Error initializing services: {str(e)}")
         app.state.services_initialized = False
+
+    # Initialize the documents.db database
+    try:
+        await DocumentPersistenceService.init_db()
+        logger.info(f"Ensured documents.db is initialized at {settings.documents_db_uri}")
+    except Exception as e:
+        logger.error(f"Error initializing documents.db: {e}")
 
 
 @app.get("/ping")

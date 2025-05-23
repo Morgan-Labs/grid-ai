@@ -1,3 +1,4 @@
+import React from "react";
 import {
   Text,
   BoxProps,
@@ -8,7 +9,8 @@ import {
   ActionIcon,
   Tooltip,
   Badge,
-  Stack
+  Stack,
+  // Switch
 } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { useInputState } from "@mantine/hooks";
@@ -24,13 +26,14 @@ import {
 } from "@tabler/icons-react";
 import { AnswerTable, useStore } from "@config/store";
 import { useDerivedState } from "@hooks";
-import { listTableStates, TableState } from "../../services/api/table-state";
+import { listTableStates, TableStateApiResponse } from "../../services/api/table-state";
 import { useState, useEffect } from "react";
+// import { notifications } from "../../utils/notifications";
 
 export function KtSwitch(props: BoxProps) {
   const table = useStore(store => store.getTable());
   const tables = useStore(store => store.tables);
-  const [tableStates, setTableStates] = useState<TableState[]>([]);
+  const [tableStates, setTableStates] = useState<TableStateApiResponse[]>([]);
   const [sortByUpdated, setSortByUpdated] = useState(true);
 
   useEffect(() => {

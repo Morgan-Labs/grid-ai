@@ -355,14 +355,23 @@ async def process_queries_in_parallel(
     batch_tasks = []
     for idx, query_params in valid_queries:
         query_type = query_params.get("query_type", "hybrid")
-        query_func = query_functions.get(query_type, hybrid_query)
         
-        # Skip query_type from parameters for function call
+        # Prepare parameters, removing unnecessary keys
         params = {k: v for k, v in query_params.items() 
                   if k not in ["query_type", "_original_req", "request"]}
         
-        # Include query_type as the first positional argument
-        task = asyncio.create_task(process_query_with_retry(query_type, **params))
+        # Call the appropriate function based on query_type
+        if query_type == "inference":
+            # Remove vector_db_service and document_id for inference_query
+            inference_params = {k: v for k, v in params.items() 
+                                if k not in ["vector_db_service", "document_id"]}
+            # No retry logic needed for inference_query directly?
+            # Assuming inference_query handles its own errors or retry is not desired.
+            task = asyncio.create_task(inference_query(**inference_params))
+        else:
+            # For RAG types, call process_query_with_retry
+            task = asyncio.create_task(process_query_with_retry(query_type, **params))
+            
         batch_tasks.append((idx, task))
     
     # Wait for all tasks to complete

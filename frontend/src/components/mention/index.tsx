@@ -130,7 +130,7 @@ const StyledInputWrapper = styled(
   .mentions__highlighter {
     ${({ colors }) =>
       colors.map(
-        (color, index) => `
+        (color: string, index: number) => `
         > strong:nth-of-type(${index + 1}) {
           background-color: ${color};
         }

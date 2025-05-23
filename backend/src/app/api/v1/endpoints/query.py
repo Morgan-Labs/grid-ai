@@ -5,6 +5,7 @@ import logging
 import time
 import uuid
 from typing import Dict, Any, List
+from copy import deepcopy
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
@@ -106,6 +107,7 @@ def configure_llm_service(
     provider: str = None,
 ) -> CompletionService:
     """Configure the LLM service based on model and provider.
+    Creates a new service instance if provider or critical settings change.
     
     Parameters
     ----------
@@ -123,8 +125,11 @@ def configure_llm_service(
     CompletionService
         The configured LLM service.
     """
-    # Set model in settings
-    settings.llm_model = model
+    # Create a copy of settings to avoid modifying the global cached instance
+    settings_copy = deepcopy(settings)
+    
+    # Set model in the copied settings
+    settings_copy.llm_model = model
     
     # Auto-detect provider from model name if not provided
     if not provider:
@@ -151,43 +156,36 @@ def configure_llm_service(
     
     # For non-OpenAI providers, always use Portkey
     if provider != "openai":
-        # Set provider to portkey in settings
-        settings.llm_provider = "portkey"
-        
-        # Create a new Portkey service
+        settings_copy.llm_provider = "portkey"
         from app.services.llm.factory import CompletionServiceFactory
-        llm_service = CompletionServiceFactory.create_service(settings)
+        # Pass the copied and modified settings to the factory
+        configured_llm_service = CompletionServiceFactory.create_service(settings_copy)
         
-        # Configure virtual key and model
-        if hasattr(llm_service, 'update_virtual_key'):
+        if hasattr(configured_llm_service, 'update_virtual_key'):
             try:
-                logger.info(f"Setting virtual key for {provider}: {virtual_key} with model: {model}")
-                llm_service.update_virtual_key(virtual_key, provider, model)
+                logger.info(f"Setting virtual key for {provider}: {virtual_key} with model: {model} using Portkey (non-OpenAI)")
+                configured_llm_service.update_virtual_key(virtual_key, provider, model)
             except Exception as e:
-                logger.error(f"Error setting virtual key: {str(e)}")
-    
-    # For OpenAI, we can either use direct OpenAI integration or Portkey
-    else:
-        # If we want to use Portkey for OpenAI too (for tracking/routing)
-        if settings.portkey_enabled:
-            settings.llm_provider = "portkey"
+                logger.error(f"Error setting virtual key (non-OpenAI): {str(e)}")
+    else: # OpenAI provider
+        if settings_copy.portkey_enabled: # Check copied settings for portkey_enabled
+            settings_copy.llm_provider = "portkey"
             from app.services.llm.factory import CompletionServiceFactory
-            llm_service = CompletionServiceFactory.create_service(settings)
+            configured_llm_service = CompletionServiceFactory.create_service(settings_copy)
             
-            # Configure virtual key and model for OpenAI through Portkey
-            if hasattr(llm_service, 'update_virtual_key'):
+            if hasattr(configured_llm_service, 'update_virtual_key'):
                 try:
-                    logger.info(f"Setting virtual key for OpenAI: {virtual_key} with model: {model}")
-                    llm_service.update_virtual_key(virtual_key, provider, model)
+                    logger.info(f"Setting virtual key for OpenAI via Portkey: {virtual_key} with model: {model}")
+                    configured_llm_service.update_virtual_key(virtual_key, provider, model)
                 except Exception as e:
-                    logger.error(f"Error setting virtual key: {str(e)}")
+                    logger.error(f"Error setting virtual key (OpenAI via Portkey): {str(e)}")
         else:
             # Use direct OpenAI integration
-            settings.llm_provider = "openai"
+            settings_copy.llm_provider = "openai"
             from app.services.llm.factory import CompletionServiceFactory
-            llm_service = CompletionServiceFactory.create_service(settings)
+            configured_llm_service = CompletionServiceFactory.create_service(settings_copy)
     
-    return llm_service
+    return configured_llm_service
 
 
 @router.post("", response_model=QueryAnswerResponse)
@@ -251,7 +249,8 @@ async def run_query(
         document_status = await document_service.get_document_status(request.document_id)
         
         # Only allow querying if document is fully processed
-        if document_status != "completed":
+        # TEMPORARY FIX: Allow 'unknown' status since documents.db migration
+        if document_status != "completed" and document_status != "unknown":
             error_message = f"Document {request.document_id} is not ready for querying (status: {document_status})"
             logger.warning(error_message)
             return QueryAnswerResponse(
@@ -260,7 +259,7 @@ async def run_query(
                     id=uuid.uuid4().hex,
                     document_id=request.document_id,
                     prompt_id=request.prompt.id,
-                    answer=f"The document is still being processed (status: {document_status}). Please try again in a moment.",
+                    answer=f"The document is still being processed. Please try again in a moment.",
                     type=request.prompt.type
                 ),
                 document_id=request.document_id,
@@ -443,7 +442,8 @@ async def run_batch_queries(
         # Check document status and prepare valid queries
         for req in requests:
             # Skip requests with document IDs that are not completed
-            if req.document_id and document_statuses.get(req.document_id) != "completed":
+            # TEMPORARY FIX: Allow 'unknown' status since documents.db migration
+            if req.document_id and document_statuses.get(req.document_id) != "completed" and document_statuses.get(req.document_id) != "unknown":
                 error_message = f"Document {req.document_id} is not ready for querying (status: {document_statuses.get(req.document_id)})"
                 logger.warning(error_message)
                 
@@ -454,7 +454,7 @@ async def run_batch_queries(
                         id=uuid.uuid4().hex,
                         document_id=req.document_id,
                         prompt_id=req.prompt.id,
-                        answer=f"The document is still being processed (status: {document_statuses.get(req.document_id)}). Please try again in a moment.",
+                        answer=f"The document is still being processed. Please try again in a moment.",
                         type=req.prompt.type
                     ),
                     document_id=req.document_id,
@@ -475,11 +475,27 @@ async def run_batch_queries(
                     req.prompt.llm_provider
                 )
             
-            # Use inference query for Inference type queries
-            if req.document_id is None:
-                # Add parameters for inference query
+            # Check if this is an inference-only query (placeholder ID)
+            # Aligning with the check in the single query endpoint
+            if req.document_id == "00000000000000000000000000000000":
+                query_type = "inference"
                 query_params.append({
-                    "query_type": "inference",
+                    "query_type": query_type,
+                    "query": req.prompt.query,
+                    "document_id": None, # Pass None downstream for clarity, type is already set
+                    "rules": req.prompt.rules,
+                    "format": req.prompt.type,
+                    "llm_service": current_llm_service,
+                    "vector_db_service": None, # No vector DB for inference
+                    "request": req, # Pass original request for response creation
+                })
+            elif req.document_id is None:
+                # Handle cases where document_id might genuinely be None (if that's valid)
+                # Currently treating this also as inference, but could be an error case depending on requirements.
+                logger.warning(f"Query received with document_id=None for request: {req.prompt.id}. Treating as inference.")
+                query_type = "inference"
+                query_params.append({
+                    "query_type": query_type,
                     "query": req.prompt.query,
                     "document_id": None,
                     "rules": req.prompt.rules,
@@ -489,11 +505,11 @@ async def run_batch_queries(
                     "request": req,
                 })
             else:
-                # Determine query type (same logic as in single query endpoint)
+                # Determine query type for actual document-based query
                 query_type = (
                     "hybrid"
                     if req.prompt.rules or req.prompt.type == "bool"
-                    else "vector"
+                    else "vector" # Default to vector if document_id is present but no rules/bool type
                 )
                 
                 # Add parameters for document-based query
@@ -504,8 +520,8 @@ async def run_batch_queries(
                     "rules": req.prompt.rules,
                     "format": req.prompt.type,
                     "llm_service": current_llm_service,
-                    "vector_db_service": vector_db_service,
-                    "request": req,
+                    "vector_db_service": vector_db_service, # Pass vector DB service
+                    "request": req, # Pass original request for response creation
                 })
         
         # If we have valid queries to process

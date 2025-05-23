@@ -17,6 +17,7 @@ import { IconFileText, IconX, IconRefresh, IconCheck, IconAlertTriangle } from "
 import { useStore } from "@config/store";
 import { AnswerTableRow } from "@config/store/store.types";
 import { fetchDocumentPreview } from "@config/api";
+import { getDocumentStatus } from "../../services/api/document";
 
 interface DocumentPreviewProps {
   row: AnswerTableRow | null;
@@ -75,6 +76,8 @@ export function KtDocumentPreview({ row, onClose }: DocumentPreviewProps) {
   const [content, setContent] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshCount, setRefreshCount] = useState(0);
+  // New state for direct document status
+  const [currentStatus, setCurrentStatus] = useState<string | null>(null);
   
   // Use refs to track state between renders
   const contentFetchedRef = useRef(false);
@@ -91,8 +94,44 @@ export function KtDocumentPreview({ row, onClose }: DocumentPreviewProps) {
     checkDocumentStatus: state.checkDocumentStatus
   }));
   
-  // Get document status from store
-  const documentStatus = document ? documents[document.id]?.status || document.status : null;
+  // First try to get document status from local state, then from store
+  // Finally fall back to the status in the row data if all else fails
+  const documentStatus = currentStatus || 
+    (document ? documents[document.id]?.status || document.status : null);
+  
+  // Fetch document status directly from the API when component mounts
+  // or when document ID or refresh count changes
+  useEffect(() => {
+    const fetchDocumentStatus = async () => {
+      if (!document || !document.id) return;
+      
+      // Skip status check if we already have a non-processing status
+      // and this isn't an explicit refresh request
+      if (refreshCount === 0 && 
+          documentStatus && 
+          documentStatus !== 'processing') {
+        console.log(`Using cached status for document ${document.id}: ${documentStatus}`);
+        return;
+      }
+      
+      try {
+        console.log(`Fetching status for document ${document.id}`);
+        const statusResponse = await getDocumentStatus(document.id);
+        
+        // Set the status in local state
+        setCurrentStatus(statusResponse.status);
+        
+        // Also update the store for other components
+        if (statusResponse.status !== documentStatus) {
+          checkStatus(document.id);
+        }
+      } catch (error) {
+        console.error(`Error fetching status for document ${document.id}:`, error);
+      }
+    };
+    
+    fetchDocumentStatus();
+  }, [document?.id, refreshCount]);
   
   // Force refresh content when document status changes to completed
   useEffect(() => {
