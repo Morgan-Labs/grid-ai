@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { Column, ReactGrid, Row } from "@silevis/reactgrid";
 import { BoxProps, ScrollArea, Pagination, Group, Text, Select, Stack, Box, ComboboxItem, LoadingOverlay } from "@mantine/core";
 import {
@@ -137,7 +137,7 @@ export function KtTable(props: BoxProps) {
   };
 
   // Function to find and navigate to a specific row
-  const navigateToRow = (rowId: string) => {
+  const navigateToRow = useCallback((rowId: string) => {
     const rowIndex = filteredRows.findIndex(row => row.id === rowId);
     if (rowIndex !== -1) {
       const targetPage = Math.ceil((rowIndex + 1) / pageSize);
@@ -147,7 +147,7 @@ export function KtTable(props: BoxProps) {
       }
     }
     return false; // No page change needed
-  };
+  }, [filteredRows, pageSize, currentPage]);
 
   // Store the navigation function in the Zustand store for type-safe access
   useEffect(() => {

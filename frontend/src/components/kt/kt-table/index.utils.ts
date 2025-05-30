@@ -185,7 +185,13 @@ export const handleContextMenu: Required<ReactGridProps>["onContextMenu"] = (
       {
         id: "rerun-rows",
         label: `Rerun ${plur("row", rowIds)}`,
-        handler: () => store.rerunRows(rowIds)
+        handler: () => {
+          store.rerunRows(rowIds);
+          // Navigate to the first row to ensure it's visible
+          if (store.navigateToRow && rowIds.length > 0) {
+            store.navigateToRow(rowIds[0]);
+          }
+        }
       },
       {
         id: "clear-rows",

@@ -103,7 +103,13 @@ function Content({ row }: { row: AnswerTableRow }) {
   });
 
   const handleRerun = () => {
-    useStore.getState().rerunRows([row.id]);
+    const state = useStore.getState();
+    state.rerunRows([row.id]);
+    
+    // Navigate to the row to ensure it's visible
+    if (state.navigateToRow) {
+      state.navigateToRow(row.id);
+    }
   };
 
   const handleDelete = () => {
