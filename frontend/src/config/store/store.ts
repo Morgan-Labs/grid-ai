@@ -44,6 +44,7 @@ export const useStore = create<Store>()(
       documentPreviews: {}, // Initialize empty document previews
       documents: {}, // Track uploaded documents and their statuses
       isLoading: false, // Add isLoading to initial state
+      navigateToRow: null, // Initialize navigation function as null
       auth: {
         token: null,
         isAuthenticated: false,

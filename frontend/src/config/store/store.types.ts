@@ -16,6 +16,7 @@ export interface Store {
   documents: Record<string, Document>; // Store documents and their statuses
   auth: AuthState;
   _saveTableStateTimer: ReturnType<typeof setTimeout> | null; // Timer for debouncing table state saves
+  navigateToRow: ((rowId: string) => boolean) | null; // Function to navigate to a specific row
 
   toggleColorScheme: () => void;
   setActivePopover: (id: string | null) => void;

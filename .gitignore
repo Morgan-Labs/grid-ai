@@ -51,3 +51,4 @@ yarn-error.log*
 
 # Project specific
 memory-bank/
+.cursor/

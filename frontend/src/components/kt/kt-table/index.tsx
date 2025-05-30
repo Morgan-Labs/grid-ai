@@ -60,16 +60,23 @@ export function KtTable(props: BoxProps) {
   const totalRows = filteredRows.length;
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
   
-  // Ensure current page is in valid range when total changes
-  const safeCurrentPage = Math.min(currentPage, totalPages);
-  if (safeCurrentPage !== currentPage) {
-    setCurrentPage(safeCurrentPage);
-  }
+  // Calculate the safe current page
+  const safeCurrentPage = useMemo(() => {
+    return Math.min(currentPage, totalPages);
+  }, [currentPage, totalPages]);
 
-  // Apply pagination to filtered rows
+  // Use useEffect to handle page validation to avoid state updates during render
+  useEffect(() => {
+    if (safeCurrentPage !== currentPage) {
+      setCurrentPage(safeCurrentPage);
+    }
+  }, [safeCurrentPage, currentPage]);
+
+  // Apply pagination to filtered rows using the safe current page
   const visibleRows = useMemo(() => {
     const startIndex = (safeCurrentPage - 1) * pageSize;
-    return filteredRows.slice(startIndex, startIndex + pageSize);
+    const endIndex = startIndex + pageSize;
+    return filteredRows.slice(startIndex, endIndex);
   }, [filteredRows, safeCurrentPage, pageSize]);
 
   const gridColumns = useMemo<Column[]>(
@@ -129,6 +136,29 @@ export function KtTable(props: BoxProps) {
     setCurrentPage(1);
   };
 
+  // Function to find and navigate to a specific row
+  const navigateToRow = (rowId: string) => {
+    const rowIndex = filteredRows.findIndex(row => row.id === rowId);
+    if (rowIndex !== -1) {
+      const targetPage = Math.ceil((rowIndex + 1) / pageSize);
+      if (targetPage !== currentPage) {
+        setCurrentPage(targetPage);
+        return true; // Indicate page change happened
+      }
+    }
+    return false; // No page change needed
+  };
+
+  // Store the navigation function in the Zustand store for type-safe access
+  useEffect(() => {
+    useStore.setState({ navigateToRow });
+    
+    // Cleanup function to remove the navigation function when component unmounts
+    return () => {
+      useStore.setState({ navigateToRow: null });
+    };
+  }, [navigateToRow]);
+
   return (
     <Stack gap="sm" pb={0} {...props}>
       <KtProgressBar />
@@ -140,7 +170,8 @@ export function KtTable(props: BoxProps) {
           loaderProps={{ type: 'dots' }}
         />
         <ScrollArea
-          style={{ flex: 1 }}
+          key={`table-${totalRows}-${currentPage}-${pageSize}`}
+          style={{ flex: 1, height: '100%' }}
           className={cn(classes.reactGridWrapper, props.className)}
         >
           <ReactGrid
@@ -176,7 +207,7 @@ export function KtTable(props: BoxProps) {
         <Box px="md" py="xs" className={classes.paginationContainer}>
           <Group justify="space-between" align="center">
             <Text size="sm" color="dimmed">
-              Showing {visibleRows.length} of {totalRows} rows
+              Showing {((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, totalRows)} of {totalRows} rows
             </Text>
             <Group gap="xs">
               <Select
@@ -187,7 +218,7 @@ export function KtTable(props: BoxProps) {
                 style={{ width: 110 }}
               />
               <Pagination
-                value={safeCurrentPage}
+                value={currentPage}
                 onChange={handlePageChange}
                 total={totalPages}
                 size="sm"
