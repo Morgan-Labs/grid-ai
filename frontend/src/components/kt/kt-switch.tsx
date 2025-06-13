@@ -134,6 +134,14 @@ export function KtSwitch(props: BoxProps) {
                 </Tooltip>
               </Group>
             </Menu.Label>
+            <Menu.Item
+              leftSection={<IconPlus size={16} />}
+              onClick={handleNewTable}
+              color="blue"
+            >
+              New table
+            </Menu.Item>
+            <Menu.Divider />
             {sortedTables.map(t => {
               const lastUpdated = getLastUpdated(t.id);
               return (
@@ -158,17 +166,16 @@ export function KtSwitch(props: BoxProps) {
                 </Menu.Item>
               );
             })}
-            <Menu.Divider />
-            <Menu.Item 
-              leftSection={<IconPlus size={16} />} 
-              onClick={handleNewTable}
-              color="blue"
-            >
-              New table
-            </Menu.Item>
           </Menu.Dropdown>
         </Menu>
-        
+        <Button
+          variant="light"
+          color="blue"
+          leftSection={<IconPlus size={16} />}
+          onClick={handleNewTable}
+        >
+          New table
+        </Button>
         <Group gap={4}>
           <Tooltip label="Rename table">
             <ActionIcon variant="subtle" onClick={handleRename} size="md">

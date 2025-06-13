@@ -816,7 +816,7 @@ export const useStore = create<Store>()(
             hasMatches = true;
             const targetColumn = columns.find(c => c.id === columnId);
             if (!targetColumn) continue;
-            const cell = row.cells[targetColumn.id];
+            const cell = row.cells[targetColumn.id] ?? ""; // Default to empty string if undefined
             if (isNil(cell) || (isNil(cell) && isNil(row.sourceData))) {
               shouldRunQuery = false;
               break;
