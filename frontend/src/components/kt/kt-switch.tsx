@@ -119,7 +119,7 @@ export function KtSwitch(props: BoxProps) {
               {table.name}
             </Button>
           </Menu.Target>
-          <Menu.Dropdown>
+          <Menu.Dropdown style={{ maxHeight: '800px', overflowY: 'auto' }}>
             <Menu.Label>
               <Group justify="space-between">
                 <Text>Tables</Text>
