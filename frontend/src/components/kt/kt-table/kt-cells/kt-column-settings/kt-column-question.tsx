@@ -53,25 +53,39 @@ export function KtColumnQuestion({
 }: Props) {
   const columns = useStore(store => store.getTable().columns);
 
-  // Process the value to convert plain entity names to mention format
+  // Smart processing: reconstruct mentions from plain text, but only when needed
   const processedValue = useMemo(() => {
     const currentValue = value || defaultValue || '';
+    
     if (!currentValue) return currentValue;
 
-    let processed = currentValue;
+    // Only process if the text contains entity names but NOT mention markup
+    // This prevents oscillation by only processing plain text
+    const mentionPattern = /@\[[^\]]+\]\([^)]+\)/;
     
-    // Find columns with entityTypes that appear in the text but aren't in mention format
+    if (mentionPattern.test(currentValue)) {
+      // Already has mention markup, return as-is
+      return currentValue;
+    }
+
+    // Check if text contains entity names that should be mentions
+    let processed = currentValue;
+
     columns
       .filter(column => column.entityType.trim())
       .forEach(column => {
         const entityType = column.entityType;
-        // Look for the entity name that's not already in mention format
-        const regex = new RegExp(`\\b${entityType}\\b(?!\\])`, 'gi');
-        processed = processed.replace(regex, `@[${entityType}](${column.id})`);
+        // Only convert if the entity name appears as a standalone word
+        const regex = new RegExp(`\\b${entityType}\\b`, 'g');
+        
+        if (regex.test(processed)) {
+          processed = processed.replace(regex, `@[${entityType}](${column.id})`);
+        }
       });
 
     return processed;
   }, [value, defaultValue, columns]);
+
   const currentColumn = useMemo(() => {
     // Try to find the current column based on the defaultValue or value
     // This is a heuristic and might not always work perfectly

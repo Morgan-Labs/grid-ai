@@ -32,7 +32,7 @@ export function Mention({
   onChange,
   options,
   ...props
-}: Props) {
+}: Props): JSX.Element {
   const [value, setValue] = useUncontrolled({
     value: value_,
     defaultValue,
@@ -51,12 +51,10 @@ export function Mention({
           const option = group?.data.find(item => item.id === match[1]);
           return (option && group?.color?.(option)) || "transparent";
         } catch (error) {
-          console.error('Error processing match in Mention component:', error);
           return "transparent";
         }
       });
     } catch (error) {
-      console.error('Error calculating colors in Mention component:', error);
       return [];
     }
   }, [value, options]);
@@ -66,7 +64,6 @@ export function Mention({
     try {
       setValue(event.target.value);
     } catch (error) {
-      console.error('Error in Mention component onChange:', error);
       // Fallback to empty string if there's an error
       setValue('');
     }
@@ -87,21 +84,39 @@ export function Mention({
       
       // If HTML contains mention-like structure, let react-mentions handle it
       if (htmlText && (htmlText.includes('data-mention') || mentionPattern.test(htmlText))) {
-        // Let react-mentions handle the HTML paste naturally
         return;
       }
 
       // If plain text contains mention markup, let react-mentions handle it
       if (plainText && mentionPattern.test(plainText)) {
-        // This looks like mention markup, let react-mentions handle it
         return;
       }
 
-      // For other cases, let the default behavior handle it
+      // Smart reconstruction: Check if pasted text matches any column entity types
+      if (plainText && options.length > 0) {
+        const triggerGroup = options.find(opt => opt.trigger === '@');
+        if (triggerGroup) {
+          // Check if any part of the pasted text matches column entity types
+          let hasMatchingEntity = false;
+
+          triggerGroup.data.forEach(column => {
+            const entityName = column.display;
+            if (entityName && plainText.includes(entityName)) {
+              hasMatchingEntity = true;
+            }
+          });
+
+          if (hasMatchingEntity) {
+            // Let react-mentions handle the paste normally, then process the result
+            // The processing will happen in the parent component via the smart processing logic
+            return;
+          }
+        }
+      }
     } catch (error) {
       console.error('Error handling paste in Mention component:', error);
     }
-  }, []);
+  }, [options]);
 
   // Handle copy events to ensure proper mention formatting
   const handleCopy = useCallback((_event: ClipboardEvent<HTMLTextAreaElement>) => {
