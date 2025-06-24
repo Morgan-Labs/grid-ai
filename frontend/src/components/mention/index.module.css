@@ -9,6 +9,9 @@
 
     .mentions__highlighter {
       padding: var(--padding) !important;
+      /* Ensure proper copy-paste behavior */
+      white-space: pre-wrap;
+      word-wrap: break-word;
     }
 
     .mentions__input {
@@ -17,6 +20,9 @@
       border-radius: var(--mantine-radius-default) !important;
       outline: none !important;
       padding: var(--padding) !important;
+      /* Ensure proper copy-paste behavior */
+      white-space: pre-wrap;
+      word-wrap: break-word;
 
       &:focus {
         border-color: var(--mantine-primary-color-filled) !important;
@@ -31,6 +37,13 @@
     /* This div is created by react-mentions and holds the suggestions list */
     div[class^="react-mentions"] {
       z-index: 1001 !important;
+    }
+
+    /* Ensure mentions are properly styled for copy-paste */
+    .mentions__mention {
+      position: relative;
+      z-index: 1;
+      pointer-events: none;
     }
   }
 }

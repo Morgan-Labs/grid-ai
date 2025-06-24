@@ -52,6 +52,26 @@ export function KtColumnQuestion({
   ...props
 }: Props) {
   const columns = useStore(store => store.getTable().columns);
+
+  // Process the value to convert plain entity names to mention format
+  const processedValue = useMemo(() => {
+    const currentValue = value || defaultValue || '';
+    if (!currentValue) return currentValue;
+
+    let processed = currentValue;
+    
+    // Find columns with entityTypes that appear in the text but aren't in mention format
+    columns
+      .filter(column => column.entityType.trim())
+      .forEach(column => {
+        const entityType = column.entityType;
+        // Look for the entity name that's not already in mention format
+        const regex = new RegExp(`\\b${entityType}\\b(?!\\])`, 'gi');
+        processed = processed.replace(regex, `@[${entityType}](${column.id})`);
+      });
+
+    return processed;
+  }, [value, defaultValue, columns]);
   const currentColumn = useMemo(() => {
     // Try to find the current column based on the defaultValue or value
     // This is a heuristic and might not always work perfectly
@@ -79,8 +99,8 @@ export function KtColumnQuestion({
         required
         placeholder={examplePlaceholder}
         disabled={disabled}
-        value={value}
-        defaultValue={defaultValue}
+        value={processedValue}
+        defaultValue={processedValue}
         onChange={onChange}
         options={[
           {
