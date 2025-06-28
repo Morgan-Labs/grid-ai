@@ -74,4 +74,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8000/ping || exit 1
 
 CMD ["gunicorn", "app.main:app", "-k", "uvicorn.workers.UvicornWorker", \
-        "--timeout", "1800", "--keep-alive", "120", "--workers", "1", "--bind", "0.0.0.0:8000"]
+        "--timeout", "1800", "--keep-alive", "120", "--workers", "2", "--bind", "0.0.0.0:8000"]

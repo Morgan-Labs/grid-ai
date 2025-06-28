@@ -4,7 +4,9 @@ import logging
 import os
 from typing import Any, Dict
 
+import inspect # Added for checking coroutine
 from fastapi import Depends, FastAPI, Request, Response
+from fastapi.responses import JSONResponse # Added JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -15,6 +17,8 @@ from app.services.document_service import DocumentService
 from app.services.embedding.factory import EmbeddingServiceFactory
 from app.services.llm.factory import CompletionServiceFactory
 from app.services.vector_db.factory import VectorDBFactory
+# Import for table_state_service.init_db
+from app.services import table_state_service as tss
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -147,9 +151,17 @@ class EnsureCORSMiddleware(BaseHTTPMiddleware):
                 # Re-raise other runtime errors
                 raise
         except Exception as e:
-            logger.error(f"Error in CORS middleware: {e}")
-            # Create a new response with CORS headers
-            response = Response(status_code=500, content={"detail": str(e)})
+            logger.error(f"Error in CORS middleware: {e}", exc_info=True) # Added exc_info for more details
+            # Create a new JSONResponse with CORS headers
+            # content must be JSON serializable, which a dict is.
+            detail_message = str(e)
+            if inspect.iscoroutine(e):
+                detail_message = "Unhandled coroutine raised as exception."
+            elif hasattr(e, 'detail') and isinstance(e.detail, str): # For FastAPI/Starlette HTTPExceptions
+                detail_message = e.detail
+            
+            response_content = {"detail": f"Error in CORS middleware: {detail_message}"}
+            response = JSONResponse(status_code=500, content=response_content)
             if origin:
                 response.headers["Access-Control-Allow-Origin"] = origin
                 response.headers["Access-Control-Allow-Credentials"] = "true"
@@ -224,30 +236,29 @@ app.include_router(api_router, prefix=settings.api_v1_str)
 async def startup_event():
     """Initialize services once at application startup."""
     logger.info("Initializing application services...")
-    
-    # Ensure data directory exists with proper permissions
-    # Use the directory from the table_states_db_uri setting
-    data_dir = os.path.dirname(os.path.abspath(settings.table_states_db_uri))
+
+    # Initialize Table State Database
     try:
-        os.makedirs(data_dir, exist_ok=True)
-        logger.info(f"Ensured data directory exists: {data_dir}")
-        
-        # Try to set directory permissions
-        try:
-            # os.chmod(data_dir, 0o777) # Removed permission setting
-            logger.info(f"Ensured data directory exists: {data_dir}")
-        except Exception as e:
-            logger.warning(f"Could not set permissions on data directory: {e}")
-
-        # Create database files if they don't exist
-        table_states_db = os.path.join(data_dir, "table_states.db")
-        if not os.path.exists(table_states_db):
-            open(table_states_db, 'a').close()
-            logger.info(f"Created table states database file: {table_states_db}")
-
+        logger.info("Initializing Table State DB...")
+        await tss.init_db() # Call the async init_db
+        logger.info("Table State DB initialized successfully.")
     except Exception as e:
-        logger.error(f"Error setting up data directory: {e}")
-    
+        logger.critical(f"CRITICAL: Table State DB initialization failed: {e}", exc_info=True)
+        # Re-raise the exception to halt application startup
+        raise
+
+    # Ensure data directory exists with proper permissions (original logic for other data if any)
+    # This part might be redundant if table_state_service.init_db() already handles its own directory.
+    # However, keeping it for safety or if other services rely on this general data_dir.
+    data_dir = os.path.dirname(os.path.abspath(settings.table_states_db_uri)) # This is for table_states.db
+    # If other services use a different data_dir, adjust accordingly or make it more generic.
+    try:
+        os.makedirs(data_dir, exist_ok=True) # Ensure dir for table_states.db exists
+        logger.info(f"Ensured data directory for table_states.db exists: {data_dir}")
+        # Permissions and file creation for table_states.db itself is now handled within table_state_service.init_db()
+    except Exception as e:
+        logger.error(f"Error ensuring data directory {data_dir}: {e}", exc_info=True)
+
     # Initialize LangSmith tracing if enabled
     if settings.langsmith_tracing and settings.langsmith_api_key:
         logger.info("Initializing LangSmith tracing")

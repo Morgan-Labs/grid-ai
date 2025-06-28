@@ -6,9 +6,11 @@ import os
 import tempfile
 import time
 import uuid
-import requests
+# import requests # Replaced with httpx
+import httpx # Added for async HTTP requests
 import aiofiles
 import json
+from filelock import FileLock, Timeout # Added for file locking
 from typing import Any, Dict, List, Optional, Tuple
 
 from langchain.schema import Document as LangchainDocument
@@ -666,38 +668,33 @@ class DocumentService:
         """
         try:
             logger.info(f"Fetching document text for document_id: {document_id}")
-            
-            # Format the API URL with document ID and token
             api_url = self.settings.document_api_endpoint.format(
-                document_id, 
+                document_id,
                 self.settings.document_api_token
             )
+            headers = {'accept': 'application/json'}
             
-            # Set headers
-            headers = {
-                'accept': 'application/json',
-            }
-            
-            # Make the request
-            response = requests.get(api_url, headers=headers)
-            
-            # Check for successful response
-            if response.status_code == 200:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                response = await client.get(api_url, headers=headers)
+                response.raise_for_status() # Raise an exception for bad status codes
+                
                 # Extract and return the text from the JSON response
                 text_content = response.json().get('text')
-                
                 if text_content:
                     logger.info(f"Successfully fetched text for document_id: {document_id} ({len(text_content)} characters)")
                     return text_content
                 else:
                     logger.warning(f"Document API returned empty text for document_id: {document_id}")
-            else:
-                logger.error(f"Failed to fetch document text, status code: {response.status_code}")
-                
+                    return None # Explicitly return None if text_content is empty or None
+                    
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error fetching document text for {document_id} from {e.request.url}: {e.response.status_code} - {e.response.text}", exc_info=True)
             return None
-            
-        except Exception as e:
-            logger.error(f"Error fetching document text: {e}", exc_info=True)
+        except httpx.RequestError as e:
+            logger.error(f"Request error fetching document text for {document_id} from {e.request.url}: {e}", exc_info=True)
+            return None
+        except Exception as e: # Catch any other unexpected errors
+            logger.error(f"Unexpected error fetching document text for {document_id}: {e}", exc_info=True)
             return None
 
     async def fetch_document_metadata_by_id(self, document_id: str) -> Optional[Dict[str, Any]]:
@@ -713,32 +710,33 @@ class DocumentService:
         Optional[Dict[str, Any]]
             The document metadata if successful, None otherwise
         """
+        if not self.settings.document_metadata_api_endpoint or not self.settings.document_api_token:
+            logger.warning("Document metadata API endpoint or token not configured.")
+            return None
+            
         try:
             logger.info(f"Fetching document metadata for document_id: {document_id}")
-
-            # Use the dedicated metadata endpoint URL from settings
             api_url = self.settings.document_metadata_api_endpoint.format(document_id)
-
-            # Set headers, including the API token if required by the external API
             headers = {
                 'accept': 'application/json',
-                'Authorization': f'Bearer {self.settings.document_api_token}' # Assuming same token works
+                'Authorization': f'Bearer {self.settings.document_api_token}'
             }
-
-            # Make the request
-            response = requests.get(api_url, headers=headers)
-
-            # Check for successful response
-            if response.status_code == 200:
+            
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                response = await client.get(api_url, headers=headers)
+                response.raise_for_status() # Raise an exception for bad status codes
                 metadata = response.json()
                 logger.info(f"Successfully fetched metadata for document_id: {document_id}")
                 return metadata
-            else:
-                logger.error(f"Failed to fetch document metadata, status code: {response.status_code}, response: {response.text}")
-                return None
-
-        except Exception as e:
-            logger.error(f"Error fetching document metadata: {e}", exc_info=True)
+                
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error fetching document metadata for {document_id} from {e.request.url}: {e.response.status_code} - {e.response.text}", exc_info=True)
+            return None
+        except httpx.RequestError as e:
+            logger.error(f"Request error fetching document metadata for {document_id} from {e.request.url}: {e}", exc_info=True)
+            return None
+        except Exception as e: # Catch any other unexpected errors
+            logger.error(f"Unexpected error fetching document metadata for {document_id}: {e}", exc_info=True)
             return None
 
     async def process_document_text(self, document_id: str, text_content: str) -> Optional[str]:
@@ -1091,34 +1089,49 @@ class DocumentService:
         """
         Save document statuses to a file for persistence.
         """
+        status_file = self._get_status_file_path()
+        lock_file = status_file + ".lock"
         try:
-            status_file = self._get_status_file_path()
-            with open(status_file, 'w') as f:
-                json.dump(self.document_statuses, f)
-            logger.debug(f"Saved {len(self.document_statuses)} document statuses to {status_file}")
+            # Acquire lock with a timeout to prevent indefinite blocking
+            with FileLock(lock_file, timeout=5): # 5 second timeout for the lock
+                with open(status_file, 'w') as f:
+                    json.dump(self.document_statuses, f)
+                logger.debug(f"Saved {len(self.document_statuses)} document statuses to {status_file}")
+        except Timeout:
+            logger.error(f"Timeout acquiring lock for saving document statuses to {status_file}. Another process may be holding the lock.")
         except Exception as e:
-            logger.error(f"Error saving document statuses: {e}")
+            logger.error(f"Error saving document statuses to {status_file}: {e}", exc_info=True)
     
     def _load_document_statuses(self) -> None:
         """
         Load document statuses from a file.
         """
+        status_file = self._get_status_file_path()
+        lock_file = status_file + ".lock"
         try:
-            status_file = self._get_status_file_path()
             if os.path.exists(status_file):
-                with open(status_file, 'r') as f:
-                    loaded_statuses = json.load(f)
+                # Acquire lock with a timeout
+                with FileLock(lock_file, timeout=5): # 5 second timeout for the lock
+                    with open(status_file, 'r') as f:
+                        loaded_statuses = json.load(f)
                     # Validate loaded data
                     valid_statuses = {
-                        doc_id: status for doc_id, status in loaded_statuses.items() 
-                        if status in ["processing", "completed", "failed"]
+                        doc_id: status for doc_id, status in loaded_statuses.items()
+                        if status in ["processing", "completed", "failed", "unknown"] # Added unknown
                     }
                     self.document_statuses = valid_statuses
                     logger.info(f"Loaded {len(self.document_statuses)} document statuses from {status_file}")
             else:
-                logger.info(f"No document status file found at {status_file}")
+                logger.info(f"No document status file found at {status_file}, initializing empty statuses.")
+                self.document_statuses = {} # Initialize if file doesn't exist
+        except Timeout:
+            logger.error(f"Timeout acquiring lock for loading document statuses from {status_file}. Another process may be holding the lock.")
+            # Initialize with empty if lock fails to avoid inconsistent state, or handle as critical error
+            self.document_statuses = {}
         except Exception as e:
-            logger.error(f"Error loading document statuses: {e}")
+            logger.error(f"Error loading document statuses from {status_file}: {e}", exc_info=True)
+            # Initialize with empty on other errors to prevent inconsistent state
+            self.document_statuses = {}
 
     async def get_document_status(self, document_id: str) -> str:
         """

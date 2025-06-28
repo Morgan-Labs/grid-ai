@@ -56,8 +56,8 @@ export const llmOptions: LLMOption[] = [
   { provider: "bedrock", model: "us.anthropic.claude-3-7-sonnet-20250219-v1:0", label: "Claude 3.7 Sonnet" },
 
   // Google models
-  // { provider: "gemini", model: "gemini-2.5-pro-exp-03-25", label: "Gemini 2.5 Pro Exp" },
-  { provider: "gemini", model: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
-  { provider: "gemini", model: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite" },
-  { provider: "gemini", model: "gemini-1.5-flash", label: "Gemini 1.5 Flash" }
+  // { provider: "gemini", model: "gemini-2.5-pro-exp-03-25", label: "Gemini 2.5 Pro Exp" }, gemini-2.5-flash-lite-preview-06-17
+  { provider: "gemini", model: "gemini-2.5-flash-preview-04-17", label: "Gemini 2.5 Flash Preview" },
+  { provider: "gemini", model: "gemini-2.5-flash-lite-preview-06-17", label: "Gemini 2.5 Flash Lite Preview" },
+  { provider: "gemini", model: "gemini-2.5-flash", label: "Gemini 2.5 Flash" }
 ];

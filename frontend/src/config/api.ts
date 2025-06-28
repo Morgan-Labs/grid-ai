@@ -416,8 +416,8 @@ export const runBatchQueries = async (
   // Default options with optimized values
   const {
     batchSize = 5,  // Use smaller batches for more reliable processing
-    maxRetries = 2,  // Keep retry count at 2
-    retryDelay = 500,  // Keep retry delay at 500ms
+    maxRetries = 3,  // Increase to 3 retries
+    retryDelay = 1000,  // Start with a 1-second delay
     onBatchProgress,
     onQueryProgress
   } = options;
@@ -733,9 +733,8 @@ async function processFailedQueries(
         return;
       }
       
-      // Add jitter to retry delay to prevent thundering herd
-      const jitter = Math.random() * 0.5 + 0.75; // 0.75-1.25
-      const delay = retryDelay * jitter * (retryCount + 1);
+      // Exponential backoff with jitter
+      const delay = retryDelay * Math.pow(2, retryCount) + Math.random() * 1000;
       
       // Wait before retrying
       await new Promise(resolve => setTimeout(resolve, delay));

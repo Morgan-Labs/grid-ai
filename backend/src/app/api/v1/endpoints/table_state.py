@@ -91,7 +91,7 @@ async def create_table_state(
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     """Create a new table state."""
     # Check if a table state with the same ID already exists
-    existing_table_state = TableStateService.get_table_state(table_state_create.id)
+    existing_table_state = await TableStateService.get_table_state(table_state_create.id)
     if existing_table_state:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -106,7 +106,7 @@ async def create_table_state(
     )
     
     # Save the table state
-    saved_table_state = TableStateService.save_table_state(table_state)
+    saved_table_state = await TableStateService.save_table_state(table_state)
     
     return TableStateResponse(
         id=saved_table_state.id,
@@ -137,7 +137,7 @@ async def list_table_states(
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     """List all table states."""
-    table_states = TableStateService.list_table_states()
+    table_states = await TableStateService.list_table_states()
     
     return TableStateListResponse(
         items=[
@@ -174,7 +174,7 @@ async def get_table_state(
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     """Get a table state by ID."""
-    table_state = TableStateService.get_table_state(table_id)
+    table_state = await TableStateService.get_table_state(table_id)
     
     if not table_state:
         raise HTTPException(
@@ -214,7 +214,7 @@ async def update_table_state(
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     """Update a table state by ID."""
     # Get the existing table state
-    existing_table_state = TableStateService.get_table_state(table_id)
+    existing_table_state = await TableStateService.get_table_state(table_id)
     
     if not existing_table_state:
         raise HTTPException(
@@ -230,7 +230,7 @@ async def update_table_state(
         existing_table_state.data = table_state_update.data
     
     # Save the updated table state
-    updated_table_state = TableStateService.save_table_state(existing_table_state)
+    updated_table_state = await TableStateService.save_table_state(existing_table_state)
     
     return TableStateResponse(
         id=updated_table_state.id,
@@ -262,7 +262,7 @@ async def delete_table_state(
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Access-Control-Request-Method, Access-Control-Request-Headers"
     """Delete a table state by ID."""
     # Delete the table state
-    deleted = TableStateService.delete_table_state(table_id)
+    deleted = await TableStateService.delete_table_state(table_id)
     
     if not deleted:
         raise HTTPException(
